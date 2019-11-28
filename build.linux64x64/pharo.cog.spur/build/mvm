@@ -11,7 +11,7 @@ if [ $# -ge 1 ]; then
 	INSTALLDIR="$1"; shift
 fi
 
-if ../../../scripts/checkSCCSversion ; then exit 1; fi
+if ../../scripts/checkSCCSversion ; then exit 1; fi
 echo -n "clean? "
 read a
 case $a in
@@ -28,14 +28,15 @@ for lib in ${THIRDPARTYLIBS}; do
 	../../third-party/mvm ${lib}
 done
 
+pn_cwd="$( cd ../../../; pwd -P )"
 test -f config.h || ../../../platforms/unix/config/configure \
 		--without-npsqueak \
 		--with-vmversion=5.0 \
 		--with-src=spur64src \
 	TARGET_ARCH="-m64" \
 	CC=clang \
-	CFLAGS="$OPT -msse2 -DCOGMTVM=0" \
-	LDFLAGS="-Wl,-rpath,'\$\$ORIGIN' "
+	CFLAGS="$OPT -msse2 -DCOGMTVM=0 -I$pn_cwd/.thirdparty-cache/linux/x86_64/include" \
+	LDFLAGS="-Wl,-rpath,'\$\$ORIGIN' -L$pn_cwd/.thirdparty-cache/linux/x86_64/lib"
 rm -f vm/sqUnixMain.o # nuke version info
 rm -rf ../../../products/$INSTALLDIR
 # prefer make install prefix=`readlink -f \`pwd\`/../../../products/$INSTALLDIR`
