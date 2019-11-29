@@ -1,10 +1,10 @@
-set(OpenSSL_Spec_URL "https://www.openssl.org/source/openssl-1.0.2q.tar.gz")
-set(OpenSSL_Spec_ArchiveName openssl-1.0.2q.tar.gz)
-set(OpenSSL_Spec_ArchiveSha256 5744cfcbcec2b1b48629f7354203bc1e5e9b5466998bbccc5b5fcde3b18eb684)
+set(OpenSSL_Spec_URL "https://www.openssl.org/source/openssl-1.1.1d.tar.gz")
+set(OpenSSL_Spec_ArchiveName openssl-1.1.1d.tar.gz)
+set(OpenSSL_Spec_ArchiveSha256 1e3a91bc1f9dfce01af26026f856e064eab4c8ee0a8f457b5ae30b40b8b711f2)
 
-set(OpenSSL_Spec_MacLibraries libssl.1.0.0.dylib libcrypto.1.0.0.dylib)
+set(OpenSSL_Spec_MacLibraries libssl.1.1.dylib libcrypto.1.1.dylib)
 set(OpenSSL_Spec_MacLibrariesSymlinks libssl*.dylib libcrypto*.dylib)
-set(OpenSSL_Spec_LinuxLibraries libssl.so.1.0.0 libcrypto.so.1.0.0)
+set(OpenSSL_Spec_LinuxLibraries libssl.so.1.1 libcrypto.so.1.1)
 set(OpenSSL_Spec_LinuxLibrariesSymlinks libssl.so* libcrypto.so*)
 set(OpenSSL_Spec_WindowsDLLs ssleay32.dll libeay32.dll)
 set(OpenSSL_Spec_WindowsLibraries libssl.dll.a libcrypto.dll.a)
@@ -70,7 +70,7 @@ else()
         set(OpenSSL_BuildCommand make)
     else(UNIX)
         if(SQUEAK_PLATFORM_X86_64)
-            set(OpenSSL_ConfigureCommand "./Configure" linux-generic32
+            set(OpenSSL_ConfigureCommand "./config"
                 "--prefix=${ThirdPartyCacheInstall}" shared)
         elseif(SQUEAK_PLATFORM_X86_32)
             set(OpenSSL_ConfigureCommand setarch i386 ./config -m32
