@@ -213,7 +213,7 @@ ioInitSecurity(void)
   if (imagePathLen)
     strncpy(secureUserDirectory, imageName, imagePathLen);
   else {
-    getwd(secureUserDirectory);
+    getcwd(secureUserDirectory, MAXPATHLEN);
 	imagePathLen = strlen(secureUserDirectory);
   }
 
