@@ -36,7 +36,7 @@ make
 
 productDir=../../../products/$INSTALLDIR
 rm -rf "$productDir"
-mkdir "$productDir"
+mkdir -p "$productDir"
 productDir=`(cd "$productDir";pwd)`
 for lib in ${THIRDPARTYLIBS}; do
 	../../third-party/mvm ${lib} install $productDir
