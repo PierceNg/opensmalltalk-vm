@@ -43,3 +43,4 @@ for lib in ${THIRDPARTYLIBS}; do
 done
 cp dist/* "$productDir"
 ../../editpharoinstall.sh "$productDir" "$@"
+true
