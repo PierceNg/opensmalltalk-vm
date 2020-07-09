@@ -1,11 +1,11 @@
 
-set(LibGit2_Spec_URL "https://github.com/libgit2/libgit2/archive/v0.25.1.tar.gz")
-set(LibGit2_Spec_ArchiveName libgit2-v0.25.1.tar.gz)
-set(LibGit2_Spec_ArchiveSha256 465c7c0a3d9b3edf151d4ada31597f2805b7c2e80b92c03062a6345e03ef8c7b)
+set(LibGit2_Spec_URL "https://github.com/libgit2/libgit2/archive/v0.26.8.tar.gz")
+set(LibGit2_Spec_ArchiveName libgit2-v0.26.8.tar.gz)
+set(LibGit2_Spec_ArchiveSha256 0f20d7e239be030db33d7350bab38ada2830b3bffab5539730074e71b0267796)
 
-set(LibGit2_Spec_MacLibraries libgit2.0.25.1.dylib)
+set(LibGit2_Spec_MacLibraries libgit2.0.26.8.dylib)
 set(LibGit2_Spec_MacLibrariesSymlinks libgit2*.dylib)
-set(LibGit2_Spec_LinuxLibraries libgit2.so.0.25.1)
+set(LibGit2_Spec_LinuxLibraries libgit2.so.0.26.8)
 set(LibGit2_Spec_LinuxLibrariesSymlinks libgit2.so*)
 set(LibGit2_Spec_WindowsDLLs libgit2.dll)
 
