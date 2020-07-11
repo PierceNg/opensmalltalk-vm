@@ -10,4 +10,4 @@ FT2Plugin \
 RePlugin \
 SDL2DisplayPlugin
 SurfacePlugin \
-SqueakSSL \
+SqueakSSL
