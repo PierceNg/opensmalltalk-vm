@@ -332,10 +332,10 @@ int windowState= WIN_CHANGED;
 
 #ifdef DEBUG_CONV
 # define DCONV_PRINTF(...) printf(__VA_ARGS__)
-# define DCONV_FPRINTF(...) fprintf(stderr,__VA_ARGS__)
+# define DCONV_PRINTERR(...) fprintf(stderr,__VA_ARGS__)
 #else
 # define DCONV_PRINTF(...) 0
-# define DCONV_FPRINTF(...) 0
+# define DCONV_PRINTERR(...) 0
 #endif
 
 
@@ -348,7 +348,6 @@ int fullScreen=		0;
 int fullScreenDirect=	0;
 int iconified=		0;
 int withSpy=		0;
-
 
 /*xxx REMOVE REFS TO THESE IN sqUnixSound*.* */
 
@@ -373,6 +372,18 @@ int inModalLoop= 0, dpyPitch= 0, dpyPixels= 0;
 static char *defaultWindowLabel = shortImageName;
 static long launchDropTimeoutMsecs = 1000; /* 1 second default launch drop timeout */
 
+/* Value of last key pressed indexed by KeyCode in the range 8 - 255 */
+static int lastKeyValue[]=
+  {
+    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+    -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
+  };
 
 /*** Functions ***/
 
@@ -1213,7 +1224,8 @@ static Atom stringToAtom(char *target, size_t size)
  * isDnd : true if XdndSelection, false if CLIPBOARD or PRIMARY
  * isClaiming : true if XGetSelectionOwner is needed
  */
-static void display_clipboardWriteWithType(char *data, size_t ndata, char *typeName, size_t nTypeName, int isDnd, int isClaiming)
+static void
+display_clipboardWriteWithType(char *data, size_t ndata, char *typeName, size_t nTypeName, int isDnd, int isClaiming)
 {
   if (allocateSelectionBuffer(ndata))
     {
@@ -1227,7 +1239,8 @@ static void display_clipboardWriteWithType(char *data, size_t ndata, char *typeN
 }
 
 
-static sqInt display_clipboardSize(void)
+static sqInt
+display_clipboardSize(void)
 {
   if (stOwnsClipboard) return 0;
   getSelection();
@@ -1235,7 +1248,8 @@ static sqInt display_clipboardSize(void)
 }
 
 
-static sqInt display_clipboardWriteFromAt(sqInt count, sqInt byteArrayIndex, sqInt startIndex)
+static sqInt
+display_clipboardWriteFromAt(sqInt count, sqInt byteArrayIndex, sqInt startIndex)
 {
   display_clipboardWriteWithType(pointerForOop(byteArrayIndex + startIndex), count, "", 0, 0, 1);
   return 0;
@@ -1244,7 +1258,8 @@ static sqInt display_clipboardWriteFromAt(sqInt count, sqInt byteArrayIndex, sqI
 /* Transfer the X selection into the given byte array; optimise local requests. */
 /* Call clipboardSize() or clipboardSizeWithType() before this. */
 
-static sqInt display_clipboardReadIntoAt(sqInt count, sqInt byteArrayIndex, sqInt startIndex)
+static sqInt
+display_clipboardReadIntoAt(sqInt count, sqInt byteArrayIndex, sqInt startIndex)
 {
   int clipSize;
 
@@ -1711,6 +1726,21 @@ static int recordPendingKeys(void)
     }
 }
 
+static inline int
+storeLastKeyValue(XKeyEvent *xevt, int value)
+{
+  lastKeyValue[xevt->keycode & 0xff]= value;
+  return value;
+}
+
+static inline int
+retrieveLastKeyValue(XKeyEvent *xevt)
+{
+  int value= lastKeyValue[xevt->keycode];
+  lastKeyValue[xevt->keycode & 0xff]= -1;
+  return value;
+}
+
 static int xkeysym2ucs4(KeySym keysym);
 
 static int x2sqKeyInput(XKeyEvent *xevt, KeySym *symbolic)
@@ -1718,7 +1748,6 @@ static int x2sqKeyInput(XKeyEvent *xevt, KeySym *symbolic)
   static int initialised= 0;
   static XIM im= 0;
   static XIC ic= 0;
-  static int lastKey= -1;
 
   if (!initialised)
     {
@@ -1753,11 +1782,7 @@ static int x2sqKeyInput(XKeyEvent *xevt, KeySym *symbolic)
     }
 
   if (KeyPress != xevt->type)
-    {
-      int key= lastKey;
-      lastKey= -1;
-      return key;
-    }
+    return retrieveLastKeyValue(xevt);
 
   DCONV_PRINTF("keycode %u\n", xevt->keycode);
 
@@ -1768,34 +1793,33 @@ static int x2sqKeyInput(XKeyEvent *xevt, KeySym *symbolic)
     switch (status)
       {
       case XLookupNone:		/* still composing */
-	DCONV_FPRINTF(stderr, "x2sqKey XLookupNone\n");
+	DCONV_PRINTERR("x2sqKey XLookupNone\n");
 	return -1;
 
       case XLookupChars:
-	DCONV_FPRINTF(stderr, "x2sqKey XLookupChars count %d\n", count);
+	DCONV_PRINTERR("x2sqKey XLookupChars count %d\n", count);
       case XLookupBoth:
-	DCONV_FPRINTF(stderr, "x2sqKey XLookupBoth count %d\n", count);
-	lastKey= (count ? string[0] : -1);
-	DCONV_FPRINTF(stderr, "x2sqKey == %d\n", lastKey);
-	return lastKey;
+	DCONV_PRINTERR("x2sqKey XLookupBoth count %d\n", count);
+	DCONV_PRINTERR("x2sqKey == %d\n", count ? string[0] : -1);
+	return storeLastKeyValue(xevt, count ? string[0] : -1);
 
       case XLookupKeySym:
-	DCONV_FPRINTF(stderr, "x2sqKey XLookupKeySym\n");
+	DCONV_PRINTERR("x2sqKey XLookupKeySym\n");
 	{
 	  int charCode= translateCode(*symbolic, 0, xevt);
-	  DCONV_FPRINTF("SYM %d -> %d\n", symbolic, charCode);
+	  DCONV_PRINTERR("SYM %d -> %d\n", symbolic, charCode);
 	  if (charCode < 0)
 	    return -1;	/* unknown key */
 	  if ((charCode == 127) && mapDelBs)
 	    charCode= 8;
-	  return lastKey= charCode;
+	  return storeLastKeyValue(xevt, charCode);
 	}
 
       default:
 	fprintf(stderr, "this cannot happen\n");
-	return lastKey= -1;
+	return storeLastKeyValue(xevt, -1);
       }
-    return lastKey= -1;
+    return storeLastKeyValue(xevt, -1);
   }
 
  revertInput:
@@ -1805,8 +1829,6 @@ static int x2sqKeyInput(XKeyEvent *xevt, KeySym *symbolic)
 
 static int x2sqKeyCompositionInput(XKeyEvent *xevt, KeySym *symbolic)
 {
-  static int lastKey= -1;
-
 # if defined(INIT_INPUT_WHEN_KEY_PRESSED)
   if (!inputContext)
     {
@@ -1817,13 +1839,9 @@ static int x2sqKeyCompositionInput(XKeyEvent *xevt, KeySym *symbolic)
 # endif
 
   if (KeyPress != xevt->type)
-    {
-      int key= lastKey;
-      lastKey= -1;
-      return key;
-    }
+    return retrieveLastKeyValue(xevt);
 
-  DCONV_FPRINTF(stderr, "keycode %u\n", xevt->keycode);
+  DCONV_PRINTERR("keycode %u\n", xevt->keycode);
 
   {
     Status status;
@@ -1831,13 +1849,13 @@ static int x2sqKeyCompositionInput(XKeyEvent *xevt, KeySym *symbolic)
     if (localeEncoding == sqTextEncoding)
       {
 	if (!(inputBuf= lookupKeys(XmbLookupString, xevt, inputString, sizeof(inputString), &inputCount, symbolic, &status)))
-	  return lastKey= -1;
+	  return storeLastKeyValue(xevt, -1);
       }
 #  if defined(X_HAVE_UTF8_STRING)
     else if (uxUTF8Encoding == sqTextEncoding)
       {
 	if (!(inputBuf= lookupKeys(Xutf8LookupString, xevt, inputString, sizeof(inputString), &inputCount, symbolic, &status)))
-	  return lastKey= -1;
+	  return storeLastKeyValue(xevt, -1);
       }
 #  endif
     else
@@ -1846,7 +1864,7 @@ static int x2sqKeyCompositionInput(XKeyEvent *xevt, KeySym *symbolic)
 	if (!(aBuf= lookupKeys(XmbLookupString, xevt, aStr, sizeof(aStr), &inputCount, symbolic, &status)))
 	  {
 	    fprintf(stderr, "status xmb2: %d\n", status);
-	    return lastKey= -1;
+	    return storeLastKeyValue(xevt, -1);
 	  }
 	if (inputCount > sizeof(inputString))
 	  {
@@ -1856,7 +1874,7 @@ static int x2sqKeyCompositionInput(XKeyEvent *xevt, KeySym *symbolic)
 		 fprintf(stderr, "x2sqKeyInput: out of memory\n");
 		 if (aStr != aBuf)
 		   free(aBuf);
-		 return lastKey= -1;
+		 return storeLastKeyValue(xevt, -1);
 	      }
 	  }
 	else
@@ -1868,19 +1886,19 @@ static int x2sqKeyCompositionInput(XKeyEvent *xevt, KeySym *symbolic)
     switch (status)
       {
       case XLookupNone:		/* still composing */
-	DCONV_FPRINTF(stderr, "x2sqKey XLookupNone\n");
+	DCONV_PRINTERR("x2sqKey XLookupNone\n");
 	return -1;
 
       case XLookupChars:
-	DCONV_FPRINTF(stderr, "x2sqKey XLookupChars count %d\n", inputCount);
+	DCONV_PRINTERR("x2sqKey XLookupChars count %d\n", inputCount);
       case XLookupBoth:
-	DCONV_FPRINTF(stderr, "x2sqKey XLookupBoth count %d\n", inputCount);
+	DCONV_PRINTERR("x2sqKey XLookupBoth count %d\n", inputCount);
 	if (inputCount == 0)
-	  return lastKey= -1;
+	    return storeLastKeyValue(xevt, -1);
 	else if (inputCount == 1)
 	  {
 	    inputCount= 0;
-	    return lastKey= inputBuf[0];
+	    return storeLastKeyValue(xevt, inputBuf[0]);
 	  }
 	else
 	  {
@@ -1895,24 +1913,24 @@ static int x2sqKeyCompositionInput(XKeyEvent *xevt, KeySym *symbolic)
 
 	    /* unclear which is best value for lastKey... */
 #          if 1
-	    lastKey= (inputCount == 1 ? inputBuf[0] : -1);
+	    storeLastKeyValue(xevt, inputCount == 1 ? inputBuf[0] : -1);
 #          else
-	    lastKey= (inputCount ? inputBuf[0] : -1);
-	    lastKey= (inputCount > 0 ? inputBuf[inputCount - 1] : -1);
+	    storeLastKeyValue(xevt, inputCount ? inputBuf[0] : -1);
+	    storeLastKeyValue(xevt, inputCount > 0 ? inputBuf[inputCount - 1] : -1);
 #          endif
 	
 	    return -1; /* we've already recorded the key events */
 	  }
 
       case XLookupKeySym:
-	DCONV_FPRINTF(stderr, "x2sqKey XLookupKeySym\n");
+	DCONV_PRINTERR("x2sqKey XLookupKeySym\n");
 	{
 	  int charCode;
 	  if (*symbolic == XK_Multi_key)
 	    {
 	      multi_key_pressed= 1;
 	      multi_key_buffer= 0;
-	      DCONV_FPRINTF(stderr, "multi_key was pressed\n");
+	      DCONV_PRINTERR("multi_key was pressed\n");
 	      return -1;
 	  }
 	  
@@ -1922,14 +1940,14 @@ static int x2sqKeyCompositionInput(XKeyEvent *xevt, KeySym *symbolic)
 	    return -1;	/* unknown key */
 	  if ((charCode == 127) && mapDelBs)
 	    charCode= 8;
-	  return lastKey= charCode;
+	  return storeLastKeyValue(xevt, charCode);
 	}
 
       default:
 	fprintf(stderr, "this cannot happen\n");
-	return lastKey= -1;
+	return storeLastKeyValue(xevt, -1);
       }
-    return lastKey= -1;
+    return storeLastKeyValue(xevt, -1);
   }
 }
 
@@ -2262,12 +2280,12 @@ static int xkeysym2ucs4(KeySym keysym)
              0x2a, /* Multiply  */
              0x2b, /* Add       */
              0x2c, /* Separator */
-             0x2d, /* Substract */
+             0x2d, /* Subtract */
              0x2e, /* Decimal   */
              0x2f  /* Divide    */
      };
 
- 	static unsigned short const sqSpecialKey[] = { 
+  static unsigned short const sqSpecialKey[] = { 
              1,  /* HOME  */
              28, /* LEFT  */ 
              30, /* UP    */
@@ -2277,8 +2295,7 @@ static int xkeysym2ucs4(KeySym keysym)
              12, /* NEXT (page down/new page?) */
              4,  /* END */
              1   /* HOME */
-     };
-
+  };
 
   /* Latin-1 */
   if (   (keysym >= 0x0020 && keysym <= 0x007e)
@@ -2408,7 +2425,8 @@ static void waitForCompletions(void)
  * CLIPBOARD as a NULL-terminated array of strings, or 0 on error.
  * The caller must free() the returned array.
  */
-static char **display_clipboardGetTypeNames(void)
+static char **
+display_clipboardGetTypeNames(void)
 {
   Atom    *targets= NULL;
   size_t   bytes= 0;
@@ -2436,7 +2454,8 @@ static char **display_clipboardGetTypeNames(void)
 /* Read the clipboard data associated with the typeName to
  * stPrimarySelection.  Answer the size of the data.
  */
-static sqInt display_clipboardSizeWithType(char *typeName, int nTypeName)
+static sqInt
+display_clipboardSizeWithType(char *typeName, int nTypeName)
 {
   size_t 	  bytes;
   Atom   	  type;
@@ -3647,11 +3666,11 @@ handleEvent(XEvent *evt)
     case KeyPress:
       noteEventState(evt->xkey);
       {
-	KeySym symbolic;
+	KeySym symbolic= 0;
 	int keyCode= x2sqKey(&evt->xkey, &symbolic);
 	int ucs4= xkeysym2ucs4(symbolic);
-	DCONV_FPRINTF(stderr, "symbolic, keyCode, ucs4: %x, %d, %d\n", symbolic, keyCode, ucs4);
-	DCONV_FPRINTF(stderr, "pressed, buffer: %d, %x\n", multi_key_pressed, multi_key_buffer);
+	DCONV_PRINTERR("symbolic, keyCode, ucs4: %x, %d, %x\n", symbolic, keyCode, ucs4);
+	DCONV_PRINTERR("pressed, buffer: %d, %x\n", multi_key_pressed, multi_key_buffer);
 	if (multi_key_pressed && multi_key_buffer == 0)
 	  {
 	    switch (ucs4)
@@ -3713,10 +3732,10 @@ handleEvent(XEvent *evt)
 	  if (symbolic != XK_Multi_key)
 	    {
 	      multi_key_pressed= 0; 
-	      DCONV_FPRINTF(stderr, "multi_key reset\n");
+	      DCONV_PRINTERR("multi_key reset\n");
 	    }
 	  }
-	DCONV_FPRINTF(stderr, "keyCode, ucs4, multi_key_buffer: %d, %d, %x\n", keyCode, ucs4, multi_key_buffer);
+	DCONV_PRINTERR("keyCode, ucs4, multi_key_buffer: %d, %d, %x\n", keyCode, ucs4, multi_key_buffer);
 	if (keyCode >= 0)
 	  {
 	    recordKeystroke(keyCode);			/* DEPRECATED */
@@ -4665,7 +4684,8 @@ translateCode(KeySym symbolic, int *modp, XKeyEvent *evt)
 #endif
 
 
-static sqInt display_ioFormPrint(sqInt bitsIndex, sqInt width, sqInt height, sqInt depth, double hScale, double vScale, sqInt landscapeFlag)
+static sqInt
+display_ioFormPrint(sqInt bitsIndex, sqInt width, sqInt height, sqInt depth, double hScale, double vScale, sqInt landscapeFlag)
 {
 # if defined(PRINT_PS_FORMS)
 
@@ -4824,7 +4844,8 @@ static sqInt display_ioFormPrint(sqInt bitsIndex, sqInt width, sqInt height, sqI
 }
 
 
-static sqInt display_ioBeep(void)
+static sqInt
+display_ioBeep(void)
 {
   if (isConnectedToXServer)
     XBell(stDisplay, 0);	/* ring at default volume */
@@ -4832,14 +4853,16 @@ static sqInt display_ioBeep(void)
 }
 
 
-static sqInt display_ioRelinquishProcessorForMicroseconds(sqInt microSeconds)
+static sqInt
+display_ioRelinquishProcessorForMicroseconds(sqInt microSeconds)
 {
   aioSleepForUsecs(handleEvents() ? 0 : microSeconds);
   return 0;
 }
 
 
-static sqInt display_ioProcessEvents(void)
+static sqInt
+display_ioProcessEvents(void)
 {
   LogEventChain((dbgEvtChF,"ioPE."));
   handleEvents();
@@ -4849,7 +4872,8 @@ static sqInt display_ioProcessEvents(void)
 
 
 /* returns the depth of the Squeak window */
-static sqInt display_ioScreenDepth(void)
+static sqInt
+display_ioScreenDepth(void)
 {
   Window root;
   int x, y;
@@ -4863,13 +4887,15 @@ static sqInt display_ioScreenDepth(void)
 }
 
 
-static double display_ioScreenScaleFactor(void)
+static double
+display_ioScreenScaleFactor(void)
 {
   return 1.0;
 }
 
 /* returns the size of the Squeak window */
-static sqInt display_ioScreenSize(void)
+static sqInt
+display_ioScreenSize(void)
 {
   int winSize= getSavedWindowSize();
 
@@ -4925,7 +4951,8 @@ static int fakeBigCursor()
 
 static sqInt display_ioSetCursorWithMaskBig(sqInt cursorBitsIndex, sqInt cursorMaskIndex, sqInt offsetX, sqInt offsetY);
 
-static sqInt display_ioSetCursorWithMask(sqInt cursorBitsIndex, sqInt cursorMaskIndex, sqInt offsetX, sqInt offsetY)
+static sqInt
+display_ioSetCursorWithMask(sqInt cursorBitsIndex, sqInt cursorMaskIndex, sqInt offsetX, sqInt offsetY)
 {
   unsigned int *cursorBits= (unsigned int *)pointerForOop(cursorBitsIndex);
   unsigned int *cursorMask= (unsigned int *)pointerForOop(cursorMaskIndex);
@@ -4985,7 +5012,8 @@ static sqInt display_ioSetCursorWithMask(sqInt cursorBitsIndex, sqInt cursorMask
 }
 
 
-static sqInt display_ioSetCursorWithMaskBig(sqInt cursorBitsIndex, sqInt cursorMaskIndex, sqInt offsetX, sqInt offsetY)
+static sqInt
+display_ioSetCursorWithMaskBig(sqInt cursorBitsIndex, sqInt cursorMaskIndex, sqInt offsetX, sqInt offsetY)
 {
   unsigned int *cursorBits= (unsigned int *)pointerForOop(cursorBitsIndex);
   unsigned int *cursorMask= (unsigned int *)pointerForOop(cursorMaskIndex);
@@ -5044,7 +5072,8 @@ sqInt ioSetCursor(sqInt cursorBitsIndex, sqInt offsetX, sqInt offsetY)
 #endif
 
 
-static sqInt display_ioSetCursorARGB(sqInt cursorBitsIndex, sqInt extentX, sqInt extentY, sqInt offsetX, sqInt offsetY)
+static sqInt
+display_ioSetCursorARGB(sqInt cursorBitsIndex, sqInt extentX, sqInt extentY, sqInt offsetX, sqInt offsetY)
 {
 #if defined(HAVE_LIBXRENDER) && (RENDER_MAJOR > 0 || RENDER_MINOR >= 5)
   int eventbase, errorbase;
@@ -5148,7 +5177,8 @@ static void sendFullScreenHint(int enable)
 }
 
 
-static sqInt display_ioSetFullScreen(sqInt fullScreen)
+static sqInt
+display_ioSetFullScreen(sqInt fullScreen)
 {
   int winX, winY;
   unsigned int winW, winH;
@@ -5346,7 +5376,8 @@ static void stXDestroyImage(XImage *image)
 #define bytesPerLineRD(width, depth)	((((width)*(depth)) >> 5) << 2)
 
 
-static sqInt display_ioForceDisplayUpdate(void)
+static sqInt
+display_ioForceDisplayUpdate(void)
 {
 #if defined(USE_XSHM)
   if (asyncUpdate && isConnectedToXServer)
@@ -5359,7 +5390,8 @@ static sqInt display_ioForceDisplayUpdate(void)
 }
 
 
-static sqInt display_ioShowDisplay(sqInt dispBitsIndex, sqInt width, sqInt height, sqInt depth,
+static sqInt
+display_ioShowDisplay(sqInt dispBitsIndex, sqInt width, sqInt height, sqInt depth,
 				   sqInt affectedL, sqInt affectedR, sqInt affectedT, sqInt affectedB)
 {
   static char *stDisplayBits= 0;	/* last known oop of the VM's Display */
@@ -5705,7 +5737,8 @@ static sqInt display_ioShowDisplay(sqInt dispBitsIndex, sqInt width, sqInt heigh
 }
 
 
-static sqInt display_ioHasDisplayDepth(sqInt i)
+static sqInt
+display_ioHasDisplayDepth(sqInt i)
 {
   switch (i)
     {
@@ -5722,7 +5755,8 @@ static sqInt display_ioHasDisplayDepth(sqInt i)
 }
 
 
-static sqInt display_ioSetDisplayMode(sqInt width, sqInt height, sqInt depth, sqInt fullscreenFlag)
+static sqInt
+display_ioSetDisplayMode(sqInt width, sqInt height, sqInt depth, sqInt fullscreenFlag)
 {
   fprintf(stderr, "ioSetDisplayMode(%ld, %ld, %ld, %ld)\n",
 	  width, height, depth, fullscreenFlag);
@@ -6701,7 +6735,8 @@ void copyImage32To24(int *fromImageData, int *toImageData, int width, int height
 }
 
 
-static void display_winSetName(char *imageName)
+static void
+display_winSetName(char *imageName)
 {
   /* update the window title */
   if (isConnectedToXServer)
@@ -6825,8 +6860,7 @@ static void display_ioGLsetBufferRect(glRenderer *r, sqInt x, sqInt y, sqInt w, 
 
 static FILE *logfile = 0;
 static void
-closelog(void)
-{ if (logfile) (void)fclose(logfile); }
+closelog(void) { if (logfile) (void)fclose(logfile); }
 
 static int
 myPrint3Dlog(char *fmt, ...)
@@ -6893,7 +6927,8 @@ static sqInt display_ioGLinitialise(void) { return 1; }
 #define _renderContext(R)	((R)->context)
 #define renderContext(R)	((GLXContext)(R)->context)
 
-static sqInt display_ioGLcreateRenderer(glRenderer *r, sqInt x, sqInt y, sqInt w, sqInt h, sqInt flags)
+static sqInt
+display_ioGLcreateRenderer(glRenderer *r, sqInt x, sqInt y, sqInt w, sqInt h, sqInt flags)
 {
   XVisualInfo* visinfo= 0;
 
@@ -6990,20 +7025,23 @@ static sqInt display_ioGLcreateRenderer(glRenderer *r, sqInt x, sqInt y, sqInt w
 }
 
 
-static void display_ioGLdestroyRenderer(glRenderer *r)
+static void
+display_ioGLdestroyRenderer(glRenderer *r)
 {
   glXDestroyContext(stDisplay, renderContext(r));
   XDestroyWindow(stDisplay, renderWindow(r));
 }
 
 
-static void display_ioGLswapBuffers(glRenderer *r)
+static void
+display_ioGLswapBuffers(glRenderer *r)
 {
   glXSwapBuffers(stDisplay, renderWindow(r));
 }
 
 
-static sqInt display_ioGLmakeCurrentRenderer(glRenderer *r)
+static sqInt
+display_ioGLmakeCurrentRenderer(glRenderer *r)
 {
   if (r)
     {
@@ -7019,7 +7057,8 @@ static sqInt display_ioGLmakeCurrentRenderer(glRenderer *r)
 }
 
 
-static void display_ioGLsetBufferRect(glRenderer *r, sqInt x, sqInt y, sqInt w, sqInt h)
+static void
+display_ioGLsetBufferRect(glRenderer *r, sqInt x, sqInt y, sqInt w, sqInt h)
 {
   XMoveResizeWindow(stDisplay, renderWindow(r), x, y, w, h);
 }
@@ -7109,7 +7148,8 @@ static long display_hostWindowShowDisplay(unsigned *dispBitsIndex, long width, l
 #define isWindowHandle(winIdx) ((realWindowHandle(winIdx)) >= 65536)
 
 static long display_ioSizeOfNativeWindow(void *windowHandle);
-static long display_hostWindowGetSize(long windowIndex)
+static long
+display_hostWindowGetSize(long windowIndex)
 {
   return isWindowHandle(windowIndex)
     ? display_ioSizeOfNativeWindow((void *)realWindowHandle(windowIndex))
@@ -7119,7 +7159,8 @@ static long display_hostWindowGetSize(long windowIndex)
 /* ioSizeOfWindowSetxy: args are int windowIndex, int w & h for the
  * width / height to make the window. Return the actual size the OS
  * produced in (width<<16 | height) format or -1 for failure as above. */
-static long display_hostWindowSetSize(long windowIndex, long w, long h)
+static long
+display_hostWindowSetSize(long windowIndex, long w, long h)
 {
   XWindowAttributes attrs;
   int real_border_width;
@@ -7151,7 +7192,8 @@ static long display_hostWindowGetPosition(long windowIndex)
 /* ioPositionOfWindowSetxy: args are int windowIndex, int x & y for the
  * origin x/y for the window. Return the actual origin the OS
  * produced in (left<<16 | top) format or -1 for failure, as above */
-static long display_hostWindowSetPosition(long windowIndex, long x, long y)
+static long
+display_hostWindowSetPosition(long windowIndex, long x, long y)
 {
   if (!isWindowHandle(windowIndex))
     return -1;
@@ -7161,7 +7203,8 @@ static long display_hostWindowSetPosition(long windowIndex, long x, long y)
 }
 
 
-static long display_hostWindowSetTitle(long windowIndex, char *newTitle, long sizeOfTitle)
+static long
+display_hostWindowSetTitle(long windowIndex, char *newTitle, long sizeOfTitle)
 { 
   if (windowIndex != 1 && windowIndex != stParent && windowIndex != stWindow)
     return -1;
@@ -7174,7 +7217,8 @@ static long display_hostWindowSetTitle(long windowIndex, char *newTitle, long si
   return 0;
 }
 
-static long display_ioSizeOfNativeWindow(void *windowHandle)
+static long
+display_ioSizeOfNativeWindow(void *windowHandle)
 {
   XWindowAttributes attrs;
   int real_border_width;
@@ -7191,7 +7235,8 @@ static long display_ioSizeOfNativeWindow(void *windowHandle)
     | (attrs.height + attrs.y + real_border_width);
 }
 
-static long display_ioPositionOfNativeWindow(void *windowHandle)
+static long
+display_ioPositionOfNativeWindow(void *windowHandle)
 {
   XWindowAttributes attrs;
   Window neglected_child;
@@ -7212,21 +7257,18 @@ static long display_ioPositionOfNativeWindow(void *windowHandle)
 static char *display_winSystemName(void) { return "X11"; }
 
 
-static void display_winInit(void)
+static void
+display_winInit(void)
 {
   if (!strcmp(argVec[0], "headlessSqueak"))
     headless= 1;
 
 #if defined(USE_XSHM)
-  {
 #  if defined(AT_EXIT)
     AT_EXIT(shmExit);
-    AT_EXIT((void(*)(void))ioShutdownAllModules);
 #  else
 #    warning: cannot free display bitmap on exit!
-#    warning: cannot shut down module system on exit!
 #   endif
-  }
 #endif
 
   /* avoid compiler warning */
@@ -7234,7 +7276,8 @@ static void display_winInit(void)
 }
 
 
-static void display_winOpen(int argc, char *dropFiles[])
+static void
+display_winOpen(int argc, char *dropFiles[])
 {
 #if defined(DEBUG_WINDOW)
   int sws= getSavedWindowSize();
@@ -7257,14 +7300,17 @@ static void display_winOpen(int argc, char *dropFiles[])
 }
 
 
-static void display_winExit(void)
+static void
+display_winExit(void)
 {
   disconnectXDisplay();
 }
 
 
-static long  display_winImageFind(char *buf, int len)	{ return 0; }
-static void display_winImageNotFound(void)		{}
+static long
+display_winImageFind(char *buf, int len)	{ return 0; }
+static void
+display_winImageNotFound(void)		{}
 
 #if SqDisplayVersionMajor >= 1 && SqDisplayVersionMinor >= 3
 
@@ -7350,7 +7396,8 @@ SqDisplayDefine(X11);
 /*** module ***/
 
 
-static void display_printUsage(void)
+static void
+display_printUsage(void)
 {
   printf("\nX11 <option>s:\n");
   printf("  "VMOPTION("browserWindow")" <wid>  run in window <wid>\n");
@@ -7385,14 +7432,16 @@ static void display_printUsage(void)
   printf("  "VMOPTION("xshm")"                 use X shared memory extension\n");
 }
 
-static void display_printUsageNotes(void)
+static void
+display_printUsageNotes(void)
 {
   printf("  Using `unix:0' for <dpy> may improve local display performance.\n");
   printf("  "VMOPTION("xshm")" only works when " xResName " is running on the X server host.\n");
 }
 
 
-static void display_parseEnvironment(void)
+static void
+display_parseEnvironment(void)
 {
   char *ev= 0;
 
@@ -7433,7 +7482,8 @@ static void display_parseEnvironment(void)
 
 
 
-static int display_parseArgument(int argc, char **argv)
+static int
+display_parseArgument(int argc, char **argv)
 {
   int n= 1;
   char *arg= argv[0];

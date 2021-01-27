@@ -155,13 +155,12 @@ $(VMLOCALIZATION): $(OSXCOMMONDIR)/English.lproj/$(SYSTEM)-Localizable.strings
 	@mkdir -p $(dir $@)
 	cp -p $< $@
 
-$(VMMENUNIB): $(PLATDIR)/iOS/vm/English.lproj/MainMenu.xib
+$(VMMENUNIB): $(PLATDIR)/iOS/vm/English.lproj/$(SYSTEM)-MainMenu.xib
 	@mkdir -p $(dir $@)
 	$(XCUB)/ibtool --errors --warnings --notices --module $(VM) \
 	--minimum-deployment-target $(TARGET_VERSION_MIN) \
 	--auto-activate-custom-fonts --output-format human-readable-text \
-	--compile $(VMMENUNIB) \
-	$(PLATDIR)/iOS/vm/English.lproj/MainMenu.xib
+	--compile $(VMMENUNIB) $<
 
 $(APP)/Contents/Resources/%.icns: $(OSXDIR)/%.icns
 	@mkdir -p $(APP)/Contents/Resources
@@ -187,6 +186,11 @@ pathapp:
 
 # To sign the app, set SIGNING_IDENTITY in the environment, e.g.
 # export SIGNING_IDENTITY="Developer ID Application: Eliot Miranda"
+# If you're using ssh and codesign fails you probably need to unlock your
+# keychain.  List the keychain using
+#	$ security list-keychains -d user
+# Unlock using e.g.
+#	$ security unlock-keychain -p "<password>" "~/Library/Keychains/login.keychain-db"
 #
 ifeq ($(SIGNING_IDENTITY),)
 signapp:
@@ -194,7 +198,16 @@ signapp:
 else
 signapp:
 	rm -rf $(APP)/Contents/MacOS/*.cstemp
-	codesign -f --deep -s "$(SIGNING_IDENTITY)" $(APP)
+	for bundle in $(APP)/Contents/Resources/*.bundle; do \
+		codesign --force --deep -s "$(SIGNING_IDENTITY)" \
+				--timestamp --options=runtime \
+				--entitlements ../common/entitlements.plist \
+				$$bundle; \
+	done
+	codesign --force --deep -s "$(SIGNING_IDENTITY)" \
+			--timestamp --options=runtime \
+			--entitlements ../common/entitlements.plist \
+			$(APP)
 endif
 
 touchapp:

@@ -85,7 +85,7 @@ extern BOOL NSApplicationLoad(void);
 extern void pushOutputFile(char *);
 extern void popOutputFile(void);
 
-static void reportStackState(char *, char *, int, ucontext_t *);
+static void reportStackState(const char *, char *, int, ucontext_t *);
 static void block();
 static void *printRegisterState(ucontext_t *);
 
@@ -94,7 +94,7 @@ static void *printRegisterState(ucontext_t *);
 #pragma auto_inline(off)
 #if COGVM || STACKVM
 void
-error(char *msg)
+error(const char *msg)
 {
 	reportStackState(msg,0,0,0);
 	if (blockOnError) block();
@@ -120,7 +120,7 @@ block()
  * Allows e.g. writing to a log file and stderr.
  */
 static void
-reportStackState(char *msg, char *date, int printAll, ucontext_t *uap)
+reportStackState(const char *msg, char *date, int printAll, ucontext_t *uap)
 {
 # if !defined(NOEXECINFO)
 	void *addrs[BACKTRACE_DEPTH];
@@ -174,24 +174,8 @@ reportStackState(char *msg, char *date, int printAll, ucontext_t *uap)
 		 * set to the native stack & frame pointers.
 		 */
 			extern void ifValidWriteBackStackPointersSaveTo(void*,void*,char**,char**);
-#	if __i386__
-	/* see sys/ucontext.h; two different namings */
-#	  if __GNUC__ && !__INTEL_COMPILER /* icc pretends to be gcc */
-			void *fp = (void *)(uap ? uap->uc_mcontext->__ss.__ebp: 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext->__ss.__esp: 0);
-#	  else
-			void *fp = (void *)(uap ? uap->uc_mcontext->ss.ebp: 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext->ss.esp: 0);
-#	  endif
-#	elif __x86_64__
-			void *fp = (void *)(uap ? uap->uc_mcontext->__ss.__rbp: 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext->__ss.__rsp: 0);
-#	elif __linux__ && __i386__
-			void *fp = (void *)(uap ? uap->uc_mcontext.gregs[REG_EBP]: 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.gregs[REG_ESP]: 0);
-#	else
-#	  error need to implement extracting pc from a ucontext_t on this system
-#	endif
+			void *fp = (void *)(uap ? uap->_FP_IN_UCONTEXT : 0);
+			void *sp = (void *)(uap ? uap->_SP_IN_UCONTEXT : 0);
 			char *savedSP, *savedFP;
 
 			ifValidWriteBackStackPointersSaveTo(fp,sp,&savedFP,&savedSP);
@@ -262,7 +246,26 @@ printRegisterState(ucontext_t *uap)
 			regs->__r12, regs->__r13, regs->__r14, regs->__r15,
 			regs->__rip);
 	return (void *)(regs->__rip);
-# elif defined(__arm__) || defined(__arm32__)
+# elif defined(__arm64__) || defined(__aarch64__)
+	_STRUCT_ARM_THREAD_STATE64 *regs = &uap->uc_mcontext->__ss;
+	printf(	"\tx0 %p x1 %p x2 %p x3 %p\n"
+			"\tx4 %p x5 %p x6 %p x7 %p\n"
+			"\tx8 %p x9 %p x10 %p x11 %p\n"
+			"\tx12 %p x13 %p x14 %p x15 %p\n"
+			"\tx16 %p x17 %p x18 %p x19 %p\n"
+			"\tx20 %p x21 %p x22 %p x23 %p\n"
+			"\tx24 %p x25 %p x26 %p x27 %p\n"
+			"\tx29 %p  fp %p  lr %p  sp %p\n",
+			"\tcpsr 0x%08x\n",
+			regs->__x[0], regs->__x[1], regs->__x[2], regs->__x[3],
+			regs->__x[4], regs->__x[5], regs->__x[6], regs->__x[7],
+			regs->__x[8], regs->__x[9], regs->__x[10], regs->__x[11],
+			regs->__x[12], regs->__x[13], regs->__x[14], regs->__x[15],
+			regs->__x[16], regs->__x[17], regs->__x[18], regs->__x[19],
+			regs->__x[20], regs->__x[21], regs->__x[22], regs->__x[23],
+			regs->__x[24], regs->__x[25], regs->__x[26], regs->__x[27],
+			regs->__x[28], regs->__fp, regs->__lr, regs->__sp, regs->__pc, regs->__cpsr);
+#elif defined(__arm__) || defined(__arm32__)
 	_STRUCT_ARM_THREAD_STATE *regs = &uap->uc_mcontext->ss;
 	printf(	"\t r0 0x%08x r1 0x%08x r2 0x%08x r3 0x%08x\n"
 	        "\t r4 0x%08x r5 0x%08x r6 0x%08x r7 0x%08x\n"
@@ -279,13 +282,20 @@ printRegisterState(ucontext_t *uap)
 	return 0;
 #endif
 }
+
 static void
 getCrashDumpFilenameInto(char *buf)
 {
-    char *slash;
-
+#if defined(PREFERENCES_RELATIVE_LOG_LOCATION)
+	FSRef fsRef;
+	if (!FSFindFolder(kUserDomain, kPreferencesFolderType, 1, &fsRef)
+	 && !FSRefMakePath(&fsRef, buf, PATH_MAX)) {
+		strncat(buf,"/" PREFERENCES_RELATIVE_LOG_LOCATION "/crash.dmp",PATH_MAX+1);
+		return;
+	}
+#endif
     strcpy(buf,imageName);
-    slash = strrchr(buf,'/');
+    char *slash = strrchr(buf,'/');
     strcpy(slash ? slash + 1 : buf, "crash.dmp");
 }
 
@@ -326,13 +336,13 @@ sigsegv(int sig, siginfo_t *info, void *uap)
 	time_t now = time(NULL);
 	char ctimebuf[32];
 	char crashdump[PATH_MAX+1];
-	char *fault = sig == SIGSEGV
-					? "Segmentation fault"
-					: (sig == SIGBUS
-						? "Bus error"
-						: (sig == SIGILL
-							? "Illegal instruction"
-							: "Unknown signal"));
+	const char *fault = sig == SIGSEGV
+						? "Segmentation fault"
+						: (sig == SIGBUS
+							? "Bus error"
+							: (sig == SIGILL
+								? "Illegal instruction"
+								: "Unknown signal"));
 
 	if (!inFault) {
 		extern sqInt primitiveFailForFFIExceptionat(usqLong exceptionCode, usqInt pc);

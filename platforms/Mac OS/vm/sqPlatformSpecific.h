@@ -28,6 +28,9 @@
    Define plugin for Netscape Plugin building, needed for CodeWarrior
 */
 
+#ifndef _SQ_PLATFORM_SPECIFIC_H
+#define _SQ_PLATFORM_SPECIFIC_H
+
 #ifdef macintoshSqueak
 #if defined(TARGET_API_MAC_CARBON)
 # include <Types.h>
@@ -56,8 +59,6 @@
 #undef sqFTruncate
 /* sqFTruncate should return 0 on success, ftruncate does also */
 #define sqFTruncate(f,o) ftruncate(fileno(f), o)
-#define ftell ftello
-#define fseek fseeko
 
 typedef FILE *sqImageFile;
 
@@ -207,8 +208,10 @@ extern const pthread_key_t tltiIndex;
 # endif
 #endif
 
-#if !defined(VM_LABEL) || COGVM
+#if !defined(VM_LABEL) || COGVM || STACKVM
 # undef VM_LABEL
 # define VM_LABEL(foo) ((void)0)
 #endif
 #endif /* macintoshSqueak */
+
+#endif /* _SQ_PLATFORM_SPECIFIC_H */

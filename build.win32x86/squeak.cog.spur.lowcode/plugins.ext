@@ -3,10 +3,14 @@
 # See platforms/win32/plugins/SqueakSSL/Makefile
 EXTERNAL_PLUGINS = \
 B3DAcceleratorPlugin \
+CameraPlugin \
 FileAttributesPlugin \
 Squeak3D \
 SqueakFFIPrims \
 UUIDPlugin \
-Win32OSProcessPlugin
+Win32OSProcessPlugin \
+DESPlugin \
+MD5Plugin \
+SHA2Plugin \
 #BochsIA32Plugin \
 #BochsX64Plugin \

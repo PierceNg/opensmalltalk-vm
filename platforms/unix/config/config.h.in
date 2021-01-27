@@ -53,9 +53,6 @@
 /* Defined when building on Darwin */
 #undef DARWIN
 
-/* Unaligned double access */
-#undef DOUBLE_WORD_ALIGNMENT
-
 /* Define to 1 if you have `alloca', as a function or macro. */
 #undef HAVE_ALLOCA
 
@@ -117,6 +114,9 @@
 /* Define to 1 if you have the <iconv.h> header file. */
 #undef HAVE_ICONV_H
 
+/* Define to 1 if you have the <ifaddrs.h> header file. */
+#undef HAVE_IFADDRS_H
+
 /* Interpreter header file present */
 #undef HAVE_INTERP_H
 
@@ -134,6 +134,9 @@
 
 /* Define to 1 if you have the <libutil.h> header file. */
 #undef HAVE_LIBUTIL_H
+
+/* Have Xext library */
+#undef HAVE_LIBXEXT
 
 /* Have Xrender library */
 #undef HAVE_LIBXRENDER
@@ -198,8 +201,15 @@
 /* Define to 1 if you have the <stropts.h> header file. */
 #undef HAVE_STROPTS_H
 
+/* Define to 1 if `st_blksize' is a member of `struct stat'. */
+#undef HAVE_STRUCT_STAT_ST_BLKSIZE
+
 /* Define to 1 if `tm_zone' is a member of `struct tm'. */
 #undef HAVE_STRUCT_TM_TM_ZONE
+
+/* Define to 1 if your `struct stat' has `st_blksize'. Deprecated, use
+   `HAVE_STRUCT_STAT_ST_BLKSIZE' instead. */
+#undef HAVE_ST_BLKSIZE
 
 /* Sun audioio */
 #undef HAVE_SUN_AUDIOIO_H
@@ -479,8 +489,5 @@
 
 /* socklen size */
 #undef socklen_t
-
-/* 64bit signed integer */
-#undef squeakInt64
 
 #endif /* __sq_config_h */

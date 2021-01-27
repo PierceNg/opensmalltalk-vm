@@ -1,4 +1,3 @@
-
 set(LibGit2_Spec_URL "https://github.com/libgit2/libgit2/archive/v0.26.8.tar.gz")
 set(LibGit2_Spec_ArchiveName libgit2-v0.26.8.tar.gz)
 set(LibGit2_Spec_ArchiveSha256 0f20d7e239be030db33d7350bab38ada2830b3bffab5539730074e71b0267796)
@@ -33,7 +32,7 @@ set(LibGit2_Spec_CMAKE_ARGS
 add_thirdparty_with_cmake(LibGit2
     DOWNLOAD_URL ${LibGit2_Spec_URL}
     ARCHIVE_NAME ${LibGit2_Spec_ArchiveName}
-    ARCHIVE_SHA256 ${LibGit2_Spec_ArchiveSha256}
+    ARCHIVE_HASH ${LibGit2_Spec_ArchiveHash}
     CMAKE_EXTRA_ARGS ${LibGit2_Spec_CMAKE_ARGS}
     MAC_LIBRARIES ${LibGit2_Spec_MacLibraries}
     MAC_LIBRARIES_SYMLINK_PATTERNS ${LibGit2_Spec_MacLibrariesSymlinks}

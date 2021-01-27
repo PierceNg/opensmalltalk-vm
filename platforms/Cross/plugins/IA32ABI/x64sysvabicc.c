@@ -17,7 +17,7 @@
 #if x86_64|x64|__x86_64|__x86_64__
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
-# include "windows.h" /* for GetSystemInfo & VirtualAlloc */
+# include <Windows.h> /* for GetSystemInfo & VirtualAlloc */
 # error Windows doesn't use the SystemV ABI
 #elif __APPLE__ && __MACH__
 # include <sys/mman.h> /* for mprotect */
@@ -30,9 +30,11 @@ struct objc_class *baz;
 void setbaz(void *p) { baz = p; }
 void *getbaz() { return baz; }
 # endif
+# include <unistd.h> /* for getpagesize/sysconf */
 # include <stdlib.h> /* for valloc */
 # include <sys/mman.h> /* for mprotect */
 #else
+# include <unistd.h> /* for getpagesize/sysconf */
 # include <stdlib.h> /* for valloc */
 # include <sys/mman.h> /* for mprotect */
 #endif
@@ -171,7 +173,6 @@ thunkEntry(long a0, long a1, long a2, long a3, long a4, long a5,
 			void *thunkp, sqIntptr_t *stackp)
 {
 	VMCallbackContext vmcc;
-	VMCallbackContext *previousCallbackContext;
 	long flags, returnType;
 	long intargs[6];
 	double fpargs[8];
@@ -199,7 +200,7 @@ thunkEntry(long a0, long a1, long a2, long a3, long a4, long a5,
 	}
 
 	if (!(returnType = setjmp(vmcc.trampoline))) {
-		previousCallbackContext = getMRCC();
+		vmcc.savedMostRecentCallbackContext = getMRCC();
 		setMRCC(&vmcc);
 		vmcc.thunkp = thunkp;
 		vmcc.stackp = stackp + 2; /* skip address of retpc & retpc (thunk) */
@@ -207,11 +208,11 @@ thunkEntry(long a0, long a1, long a2, long a3, long a4, long a5,
 		vmcc.floatregargsp = fpargs;
 		interpreterProxy->sendInvokeCallbackContext(&vmcc);
 		fprintf(stderr,"Warning; callback failed to invoke\n");
-		setMRCC(previousCallbackContext);
+		setMRCC(vmcc.savedMostRecentCallbackContext);
 		interpreterProxy->disownVM(flags);
 		return -1;
 	}
-	setMRCC(previousCallbackContext);
+	setMRCC(vmcc.savedMostRecentCallbackContext);
 	interpreterProxy->disownVM(flags);
 
 	switch (returnType) {
@@ -280,7 +281,11 @@ allocateExecutablePage(sqIntptr_t *size)
 	if (mem)
 		*size = pagesize;
 #else
+# if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 200112L
 	long pagesize = getpagesize();
+# else
+	long pagesize = sysconf(_SC_PAGESIZE);
+# endif
 
 	/* This is equivalent to valloc(pagesize) but at least on some versions of
 	 * SELinux valloc fails to yield an wexecutable page, whereas this mmap

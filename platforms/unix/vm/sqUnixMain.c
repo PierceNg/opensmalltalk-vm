@@ -36,6 +36,7 @@
 #include "sq.h"
 #include "sqAssert.h"
 #include "sqMemoryAccess.h"
+#include "sqImageFileAccess.h"
 #include "sqaio.h"
 #include "sqUnixCharConv.h"
 #include "sqSCCSVersion.h"
@@ -71,6 +72,11 @@
 #endif
 
 #undef	DEBUG_MODULES
+
+#ifdef MUSL
+void pushOutputFile(char *fileNameOrStdioIndex) {;}
+void popOutputFile() {;}
+#endif
 
 #undef	IMAGE_DUMP				/* define to enable SIGHUP and SIGQUIT handling */
 
@@ -201,7 +207,8 @@ ioInitTime(void)
 }
 
 
-long ioMSecs(void)
+unsigned int
+ioMSecs(void)
 {
   struct timeval now;
   gettimeofday(&now, 0);
@@ -214,7 +221,8 @@ long ioMSecs(void)
   return lowResMSecs= (now.tv_usec / 1000 + now.tv_sec * 1000);
 }
 
-long ioMicroMSecs(void)
+unsigned int
+ioMicroMSecs(void)
 {
   /* return the highest available resolution of the millisecond clock */
   return ioMSecs();	/* this already to the nearest millisecond */
@@ -875,7 +883,7 @@ static void outOfMemory(void)
 static void *printRegisterState(ucontext_t *uap);
 
 static void
-reportStackState(char *msg, char *date, int printAll, ucontext_t *uap)
+reportStackState(const char *msg, char *date, int printAll, ucontext_t *uap)
 {
 #if !defined(NOEXECINFO) && defined(HAVE_EXECINFO_H)
 	void *addrs[BACKTRACE_DEPTH];
@@ -919,42 +927,8 @@ reportStackState(char *msg, char *date, int printAll, ucontext_t *uap)
 			 * dump machinery has of giving us an accurate report is if we set
 			 * stackPointer & framePointer to the native stack & frame pointers.
 			 */
-# if __APPLE__ && __MACH__ && __i386__
-			void *fp = (void *)(uap ? uap->uc_mcontext->ss.ebp : 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext->ss.esp : 0);
-# elif __linux__ && __i386__
-			void *fp = (void *)(uap ? uap->uc_mcontext.gregs[REG_EBP] : 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.gregs[REG_ESP] : 0);
-#	elif __linux__ && __x86_64__
-			void *fp = (void *)(uap ? uap->uc_mcontext.gregs[REG_RBP] : 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.gregs[REG_RSP] : 0);
-# elif __FreeBSD__ && __i386__
-			void *fp = (void *)(uap ? uap->uc_mcontext.mc_ebp : 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.mc_esp : 0);
-# elif __FreeBSD__ && __amd64__
-			void *fp = (void *)(uap ? uap->uc_mcontext.mc_rbp : 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.mc_rsp : 0);
-# elif __OpenBSD__ && __i386__
-			void *fp = (void *)(uap ? uap->sc_ebp : 0);
-			void *sp = (void *)(uap ? uap->sc_esp : 0);
-# elif __OpenBSD__ && __amd64__
-			void *fp = (void *)(uap ? uap->sc_rbp : 0);
-			void *sp = (void *)(uap ? uap->sc_rsp : 0);
-# elif __sun__ && __i386__
-			void *fp = (void *)(uap ? uap->uc_mcontext.gregs[REG_FP] : 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.gregs[REG_SP] : 0);
-# elif __sun__ && __amd64
-			void *fp = (void *)(uap ? uap->uc_mcontext.gregs[REG_FP] : 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.gregs[REG_SP] : 0);
-# elif defined(__arm64__) || defined(__aarch64__) || defined(ARM64)
-			void *fp = (void *)(uap ? uap->uc_mcontext.regs[29] : 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.sp : 0);
-# elif defined(__arm__) || defined(__arm32__) || defined(ARM32)
-			void *fp = (void *)(uap ? uap->uc_mcontext.arm_fp : 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.arm_sp : 0);
-# else
-#	error need to implement extracting pc from a ucontext_t on this system
-# endif
+			void *fp = (void *)(uap ? uap->_FP_IN_UCONTEXT : 0);
+			void *sp = (void *)(uap ? uap->_SP_IN_UCONTEXT : 0);
 			char *savedSP, *savedFP;
 
 			ifValidWriteBackStackPointersSaveTo(fp,sp,&savedFP,&savedSP);
@@ -1036,7 +1010,7 @@ printRegisterState(ucontext_t *uap)
 			uap->sc_r8, uap->sc_r9, uap->sc_r10, uap->sc_r11,
 			uap->sc_r12, uap->sc_r13, uap->sc_r14, uap->sc_r15,
 			uap->sc_rip);
-	return (void*)uap->sc_rip;
+	return (void *)uap->sc_rip;
 # elif __linux__ && (defined(__arm64__) || defined(__aarch64__))
 	void **regs = (void **)&uap->uc_mcontext.regs[0];
 	printf(	"\tx0 %p x1 %p x2 %p x3 %p\n"
@@ -1055,7 +1029,7 @@ printRegisterState(ucontext_t *uap)
 			regs[20], regs[21], regs[22], regs[23],
 			regs[24], regs[25], regs[26], regs[27],
 			regs[28], regs[29], regs[30], (void *)(uap->uc_mcontext.sp));
-	return uap->uc_mcontext.pc;
+	return (void *)uap->uc_mcontext.pc;
 # elif __linux__ && (defined(__arm__) || defined(__arm32__) || defined(ARM32))
 	struct sigcontext *regs = &uap->uc_mcontext;
 	printf(	"\t r0 0x%08x r1 0x%08x r2 0x%08x r3 0x%08x\n"
@@ -1066,6 +1040,7 @@ printRegisterState(ucontext_t *uap)
 	        regs->arm_r4,regs->arm_r5,regs->arm_r6,regs->arm_r7,
 	        regs->arm_r8,regs->arm_r9,regs->arm_r10,regs->arm_fp,
 	        regs->arm_ip, regs->arm_sp, regs->arm_lr, regs->arm_pc);
+	return (void *)uap->uc_mcontext.arm_pc;
 #else
 	printf("don't know how to derive register state from a ucontext_t on this platform\n");
 	return 0;
@@ -1093,7 +1068,7 @@ block()
 /* Disable Intel compiler inlining of error which is used for breakpoints */
 #pragma auto_inline(off)
 void
-error(char *msg)
+error(const char *msg)
 {
 	reportStackState(msg,0,0,0);
 	if (blockOnError) block();
@@ -1141,13 +1116,13 @@ sigsegv(int sig, siginfo_t *info, ucontext_t *uap)
 	time_t now = time(NULL);
 	char ctimebuf[32];
 	char crashdump[MAXPATHLEN+1];
-	char *fault = sig == SIGSEGV
-					? "Segmentation fault"
-					: (sig == SIGBUS
-						? "Bus error"
-						: (sig == SIGILL
-							? "Illegal instruction"
-							: "Unknown signal"));
+	const char *fault = sig == SIGSEGV
+						? "Segmentation fault"
+						: (sig == SIGBUS
+							? "Bus error"
+							: (sig == SIGILL
+								? "Illegal instruction"
+								: "Unknown signal"));
 
 	if (!inFault) {
 		extern sqInt primitiveFailForFFIExceptionat(usqLong exceptionCode, usqInt pc);
@@ -1195,25 +1170,25 @@ struct moduleDescription
 
 static struct moduleDescription moduleDescriptions[]=
 {
-  { &displayModule, "display", "X11"    },	/*** NO DEFAULT ***/
-  { &displayModule, "display", "fbdev"  },	/*** NO DEFAULT ***/
-  { &displayModule, "display", "null"   },	/*** NO DEFAULT ***/
+  { &displayModule, "display", "X11"    },      /*** Implicit   ***/
   { &displayModule, "display", "custom" },	/*** NO DEFAULT ***/
-  { &soundModule,   "sound",   "NAS"    },	/*** NO DEFAULT ***/
+  { &soundModule,   "sound",   "NAS"    },	/*** Implicit   ***/
   { &soundModule,   "sound",   "custom" },	/*** NO DEFAULT ***/
-  { &soundModule,   "sound",   "sndio"  },	/*** NO DEFAULT ***/
   /* when adding an entry above be sure to change the defaultModules offset below */
   { &displayModule, "display", "Quartz" },	/* defaults... */
+  { &displayModule, "display", "fbdev"  },
+  { &displayModule, "display", "null"   },
+  { &soundModule,   "sound",   "pulse"  },
   { &soundModule,   "sound",   "OSS"    },
   { &soundModule,   "sound",   "MacOSX" },
   { &soundModule,   "sound",   "Sun"    },
-  { &soundModule,   "sound",   "pulse"  },
   { &soundModule,   "sound",   "ALSA"   },
+  { &soundModule,   "sound",   "sndio"  },
   { &soundModule,   "sound",   "null"   },
   { 0,              0,         0	}
 };
 
-static struct moduleDescription *defaultModules= moduleDescriptions + 7;
+static struct moduleDescription *defaultModules= moduleDescriptions + 4;
 
 
 struct SqModule *queryLoadModule(char *type, char *name, int query)
@@ -1384,13 +1359,11 @@ static void loadModules(void)
 	    ;
   }
 
-  if (!displayModule)
-    {
+  if (!displayModule) {
       fprintf(stderr, "%s: could not find any display driver\n", exeName);
       abort();
     }
-  if (!soundModule)
-    {
+  if (!soundModule) {
       fprintf(stderr, "%s: could not find any sound driver\n", exeName);
       abort();
     }
@@ -1406,16 +1379,29 @@ static long
 strtobkm(const char *str)
 {
   char *suffix;
-  long value= strtol(str, &suffix, 10);
-  switch (*suffix)
-    {
+  long value = strtol(str, &suffix, 10);
+  switch (*suffix) {
     case 'k': case 'K':
-      value*= 1024;
-      break;
+      return value * 1024;
     case 'm': case 'M':
-      value*= 1024*1024;
-      break;
-    }
+      return value * 1024*1024;
+  }
+  return value;
+}
+
+static unsigned long
+strtobkmg(const char *str)
+{
+  char *suffix;
+  long value = strtol(str, &suffix, 10);
+  switch (*suffix) {
+    case 'k': case 'K':
+      return value * 1024UL;
+    case 'm': case 'M':
+      return value * 1024UL*1024UL;
+    case 'g': case 'G':
+      return value * 1024UL*1024UL*1024UL;
+  }
   return value;
 }
 
@@ -1453,7 +1439,9 @@ static void vm_parseEnvironment(void)
     strcpy(shortImageName, DEFAULT_IMAGE_NAME);
 
   if ((ev= getenv("SQUEAK_MEMORY")))	extraMemory= strtobkm(ev);
+#if !SPURVM
   if ((ev= getenv("SQUEAK_MMAP")))	useMmap= strtobkm(ev);
+#endif
   if ((ev= getenv("SQUEAK_PLUGINS")))	squeakPlugins= strdup(ev);
   if ((ev= getenv("SQUEAK_NOEVENTS")))	noEvents= 1;
   if ((ev= getenv("SQUEAK_NOTIMER")))	useItimer= 0;
@@ -1568,17 +1556,22 @@ static int vm_parseArgument(int argc, char **argv)
   else if (!strcmp(argv[0], VMOPTION("nojit")))     { useJit  = 0; return 1; }
   else if (!strcmp(argv[0], VMOPTION("spy")))       { withSpy = 1; return 1; }
 #endif /* !STACKVM && !COGVM */
+#if defined(AIO_DEBUG)
+  else if (!strcmp(argv[0], VMOPTION("aiolog")))	{ aioDebugLogging = 1; return 1; }
+#endif
 #if (STACKVM || NewspeakVM) && !COGVM
-  else if (!strcmp(argv[0], VMOPTION("sendtrace"))) { extern sqInt sendTrace; sendTrace = 1; return 1; }
+  else if (!strcmp(argv[0], VMOPTION("sendtrace"))) { extern volatile int sendTrace; sendTrace = 1; return 1; }
 #endif
   else if (!strcmp(argv[0], VMOPTION("single")))    { runAsSingleInstance=1; return 1; }
   /* option requires an argument */
-  else if (argc > 1 && !strcmp(argv[0], VMOPTION("memory")))   { extraMemory  = strtobkm(argv[1]); return 2; }
+  else if (argc > 1 && !strcmp(argv[0], VMOPTION("memory")))   { extraMemory  = strtobkmg(argv[1]); return 2; }
 #if !STACKVM && !COGVM
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("procs")))    { jitProcs     = atoi(argv[1]);     return 2; }
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("maxpic")))   { jitMaxPIC    = atoi(argv[1]);     return 2; }
 #endif /* !STACKVM && !COGVM */
-  else if (argc > 1 && !strcmp(argv[0], VMOPTION("mmap")))     { useMmap      = strtobkm(argv[1]); return 2; }
+#if !SPURVM
+  else if (argc > 1 && !strcmp(argv[0], VMOPTION("mmap")))     { useMmap      = strtobkmg(argv[1]); return 2; }
+#endif
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("plugins")))  { squeakPlugins= strdup(argv[1]);   return 2; }
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("encoding"))) { setEncoding(&sqTextEncoding, argv[1]); return 2; }
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("pathenc")))  { setEncoding(&uxPathEncoding, argv[1]); return 2; }
@@ -1595,7 +1588,7 @@ static int vm_parseArgument(int argc, char **argv)
     return 2; }
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("eden"))) {
     extern sqInt desiredEdenBytes;
-    desiredEdenBytes = strtobkm(argv[1]);
+    desiredEdenBytes = strtobkmg(argv[1]);
     return 2; }
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("leakcheck"))) { 
     extern sqInt checkForLeaks;
@@ -1670,7 +1663,7 @@ static int vm_parseArgument(int argc, char **argv)
 #if SPURVM
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("maxoldspace"))) { 
     extern unsigned long maxOldSpaceSize;
-    maxOldSpaceSize = (unsigned long)strtobkm(argv[1]);	 
+    maxOldSpaceSize = (unsigned long)strtobkmg(argv[1]);	 
     return 2; }
   else if (!strcmp(argv[0], VMOPTION("logscavenge"))) {
     extern void openScavengeLog(void);
@@ -1700,23 +1693,26 @@ static void vm_printUsage(void)
   printf("\nCommon <option>s:\n");
   printf("  "VMOPTION("encoding")" <enc>       set the internal character encoding (default: MacRoman)\n");
   printf("  "VMOPTION("help")"                 print this help message, then exit\n");
-  printf("  "VMOPTION("memory")" <size>[mk]    use fixed heap size (added to image size)\n");
-  printf("  "VMOPTION("mmap")" <size>[mk]      limit dynamic heap size (default: %dm)\n", DefaultMmapSize);
+  printf("  "VMOPTION("memory")" <size>[kmg]   use fixed heap size (added to image size)\n");
+#if !SPURVM
+  printf("  "VMOPTION("mmap")" <size>[kmg]     limit dynamic heap size (default: %dm)\n", DefaultMmapSize);
+#endif
   printf("  "VMOPTION("timephases")"           print start load and run times\n");
 #if STACKVM || NewspeakVM
   printf("  "VMOPTION("breaksel")" selector    set breakpoint on send of selector\n");
 #endif
 #if STACKVM
+  printf("  "VMOPTION("failonffiexception")"   when in an FFI callout primitive catch exceptions and fail the primitive\n");
   printf("  "VMOPTION("breakmnu")" selector    set breakpoint on MNU of selector\n");
-  printf("  "VMOPTION("eden")" <size>[mk]      use given eden size\n");
+  printf("  "VMOPTION("eden")" <size>[kmg]     use given eden size\n");
   printf("  "VMOPTION("leakcheck")" num        check for leaks in the heap\n");
   printf("  "VMOPTION("stackpages")" <num>     use given number of stack pages\n");
 #endif
   printf("  "VMOPTION("noevents")"             disable event-driven input support\n");
   printf("  "VMOPTION("nohandlers")"           disable sigsegv & sigusr1 handlers\n");
-  printf("  "VMOPTION("pollpip")" (0|1)        output on each poll for input\n");
-  printf("  "VMOPTION("checkpluginwrites")"    check for writes past end of object in plugins\n");
-  printf("  "VMOPTION("pathenc")" <enc>        set encoding for pathnames (default: UTF-8)\n");
+#if defined(AIO_DEBUG)
+  printf("  "VMOPTION("aiolog")"               output async io logging info\n");
+#endif
   printf("  "VMOPTION("plugins")" <path>       specify alternative plugin location (see manpage)\n");
   printf("  "VMOPTION("textenc")" <enc>        set encoding for external text (default: UTF-8)\n");
   printf("  "VMOPTION("version")"              print version information, then exit\n");
@@ -1737,7 +1733,7 @@ static void vm_printUsage(void)
   printf("  "VMOPTION("reportheadroom")"       report unused stack headroom on exit\n");
 #endif
 #if SPURVM
-  printf("  "VMOPTION("maxoldspace")" <size>[mk]    set max size of old space memory to bytes\n");
+  printf("  "VMOPTION("maxoldspace")" <size>[kmg] set max size of old space memory to bytes\n");
   printf("  "VMOPTION("logscavenge")"          log scavenging to scavenge.log\n");
 #endif
   printf("  "VMOPTION("blockonerror")"         on error or segv block, not exit.  useful for attaching gdb\n");
@@ -1967,47 +1963,37 @@ imageNotFound(char *imageName)
 }
 
 
-void imgInit(void)
+void
+imgInit(void)
 {
-  /* read the image file and allocate memory for Squeak heap */
-  for (;;)
-    {
-      FILE *f= 0;
-      struct stat sb;
-      char imageName[MAXPATHLEN];
-      sq2uxPath(shortImageName, strlen(shortImageName), imageName, 1000, 1);
-      if ((  (-1 == stat(imageName, &sb)))
-	  || ( 0 == (f= fopen(imageName, "r"))))
-	{
-	  if (dpy->winImageFind(shortImageName, sizeof(shortImageName)))
-	    continue;
-	  dpy->winImageNotFound();
-	  imageNotFound(shortImageName);
-	}
-      {
-	int fd= open(imageName, O_RDONLY);
-	if (fd < 0) abort();
-#      ifdef DEBUG_IMAGE
-	printf("fstat(%d) => %d\n", fd, fstat(fd, &sb));
-#      endif
-      }
-      recordFullPathForImageName(shortImageName); /* full image path */
-      if (extraMemory)
-	useMmap= 0;
-      else
-	extraMemory= DefaultHeapSize * 1024 * 1024;
-#    ifdef DEBUG_IMAGE
-      printf("image size %ld + heap size %ld (useMmap = %d)\n", (long)sb.st_size, extraMemory, useMmap);
-#    endif
-#if SPURVM
-	  readImageFromFileHeapSizeStartingAt(f, 0, 0);
-#else
-      extraMemory += (long)sb.st_size;
-      readImageFromFileHeapSizeStartingAt(f, extraMemory, 0);
-#endif
-      sqImageFileClose(f);
-      break;
+    /* read the image file and allocate memory for Squeak heap */
+    int fd;
+    struct stat sb;
+    char imagePath[MAXPATHLEN];
+    sq2uxPath(shortImageName, strlen(shortImageName), imagePath, MAXPATHLEN - 1, 1);
+    if (-1 == stat(imagePath, &sb) || (!S_ISREG(sb.st_mode) && !S_ISLNK(sb.st_mode))) {
+        imageNotFound(imagePath); // imageNotFound will exit
     }
+    fd = sqImageFileOpen(imagePath, "rb"); // sqImageFileOpen handles the errors. fd is valid here
+#ifdef DEBUG_IMAGE
+    printf("fstat(%d) => %d\n", fd, fstat(fd, &sb));
+#endif
+
+    recordFullPathForImageName(shortImageName); /* full image path */
+    if (extraMemory)
+        useMmap= 0;
+    else
+        extraMemory= DefaultHeapSize * 1024 * 1024;
+#ifdef DEBUG_IMAGE
+    printf("image size %ld + heap size %ld (useMmap = %d)\n", (long)sb.st_size, extraMemory, useMmap);
+#endif
+#if SPURVM
+    readImageFromFileHeapSizeStartingAt(fd, 0, 0);
+#else
+    extraMemory += (long)sb.st_size;
+    readImageFromFileHeapSizeStartingAt(fd, extraMemory, 0);
+#endif
+    sqImageFileClose(fd);
 }
 
 #if defined(__GNUC__) && ( defined(i386) || defined(__i386) || defined(__i386__)  \
@@ -2198,6 +2184,7 @@ extern sqInt reportStackHeadroom;
 #endif
   printPhaseTime(3);
   dpy->winExit();
+  ioShutdownAllModules();
   exit(ec);
   return ec;
 }

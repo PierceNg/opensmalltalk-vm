@@ -12,7 +12,7 @@ set(LibSSH2_Spec_WindowsLibraries libssh2.dll.a)
 add_thirdparty_with_autoconf(LibSSH2
     DOWNLOAD_URL ${LibSSH2_Spec_URL}
     ARCHIVE_NAME ${LibSSH2_Spec_ArchiveName}
-    ARCHIVE_SHA256 ${LibSSH2_Spec_ArchiveSha256}
+    ARCHIVE_HASH ${LibSSH2_Spec_ArchiveHash}
     AUTOCONF_EXTRA_ARGS "--with-openssl" "--with-libssl-prefix=${ThirdPartyCacheInstall}"
     MAC_LIBRARIES ${LibSSH2_Spec_MacLibraries}
     MAC_LIBRARIES_SYMLINK_PATTERNS ${LibSSH2_Spec_MacLibrariesSymlinks}

@@ -78,6 +78,7 @@
 
 #include "sq.h"
 #include "sqAssert.h"
+#include "sqImageFileAccess.h"
 #include "sqMacUIConstants.h"
 #include "sqMacMain.h"
 #include "sqMacUIMenuBar.h"
@@ -95,6 +96,7 @@
 #include "sqaio.h"
 #include "sqMacNSPluginUILogic2.h"
 #include "sqUnixCharConv.h"
+#include "include_ucontext.h"
 #include "sqSCCSVersion.h"
 
 #include <unistd.h>
@@ -109,7 +111,6 @@
 # define BACKTRACE_DEPTH 64
 #endif
 #include <signal.h>
-#include <sys/ucontext.h>
 
 extern pthread_mutex_t gEventQueueLock,gSleepLock;
 extern pthread_cond_t  gSleepLockCondition;
@@ -163,7 +164,7 @@ char *getVersionInfo(int verbose);
 static void *printRegisterState(ucontext_t *uap);
 
 static void
-reportStackState(char *msg, char *date, int printAll, ucontext_t *uap)
+reportStackState(const char *msg, char *date, int printAll, ucontext_t *uap)
 {
 #if !defined(NOEXECINFO) && defined(HAVE_EXECINFO_H)
 	void *addrs[BACKTRACE_DEPTH+1];
@@ -203,21 +204,8 @@ reportStackState(char *msg, char *date, int printAll, ucontext_t *uap)
 			 * dump machinery has of giving us an accurate report is if we set
 			 * stackPointer & framePointer to the native stack & frame pointers.
 			 */
-# if __APPLE__ && __MACH__ && __i386__
-	/* see sys/ucontext.h; two different namings */
-#	if __GNUC__ && !__INTEL_COMPILER /* icc pretends to be gcc */
-			void *fp = (void *)(uap ? uap->uc_mcontext->__ss.__ebp: 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext->__ss.__esp: 0);
-#	else
-			void *fp = (void *)(uap ? uap->uc_mcontext->ss.ebp: 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext->ss.esp: 0);
-#	endif
-# elif __linux__ && __i386__
-			void *fp = (void *)(uap ? uap->uc_mcontext.gregs[REG_EBP]: 0);
-			void *sp = (void *)(uap ? uap->uc_mcontext.gregs[REG_ESP]: 0);
-# else
-#	error need to implement extracting pc from a ucontext_t on this system
-# endif
+			void *fp = (void *)(uap ? uap->_FP_IN_UCONTEXT : 0);
+			void *sp = (void *)(uap ? uap->_SP_IN_UCONTEXT : 0);
 			char *savedSP, *savedFP;
 
 			ifValidWriteBackStackPointersSaveTo(fp,sp,&savedFP,&savedSP);
@@ -301,7 +289,7 @@ block()
 /* Disable Intel compiler inlining of error which is used for breakpoints */
 #pragma auto_inline(off)
 void
-error(char *msg)
+error(const char *msg)
 {
 	reportStackState(msg,0,0,0);
 	if (blockOnError) block();
@@ -353,13 +341,13 @@ sigsegv(int sig, siginfo_t *info, void *uap)
 	time_t now = time(NULL);
 	char ctimebuf[32];
 	char crashdump[IMAGE_NAME_SIZE+1];
-	char *fault = sig == SIGSEGV
-					? "Segmentation fault"
-					: (sig == SIGBUS
-						? "Bus error"
-						: (sig == SIGILL
-							? "Illegal instruction"
-							: "Unknown signal"));
+	const char *fault = sig == SIGSEGV
+						? "Segmentation fault"
+						: (sig == SIGBUS
+							? "Bus error"
+							: (sig == SIGILL
+								? "Illegal instruction"
+								: "Unknown signal"));
 
 	if (!inFault) {
 		inFault = 1;

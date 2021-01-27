@@ -21,6 +21,7 @@
 #include <float.h>
 #include <ole2.h>
 #include "sq.h"
+#include "sqImageFileAccess.h"
 #include "sqWin32Prefs.h"
 #include "sqAssert.h"
 #include "sqWin32Backtrace.h"
@@ -79,7 +80,7 @@
 #define  IMAGE_SIZEOF_NT_OPTIONAL_HEADER  sizeof(IMAGE_OPTIONAL_HEADER)
 #endif
 
-/* Windows Vista support 
+/* Windows Vista support
  * AUTHOR: Korakurider (kr)
  * CHANGE NOTES:
  *   1) new command line option "-lowRights" was introduced
@@ -92,7 +93,7 @@
 /*** Crash debug -- Imported from Virtual Machine ***/
 int getFullScreenFlag(void);
 sqInt methodPrimitiveIndex(void);
-int getCurrentBytecode(void);
+sqInt getCurrentBytecode(void);
 
 extern void printPhaseTime(int);
 
@@ -135,7 +136,7 @@ static WCHAR vmLogDirW[MAX_PATH];
 
 WCHAR *logName = L"";             /* full path and name to log file */
 
-#ifdef VISTA_SECURITY 
+#ifdef VISTA_SECURITY
 BOOL fLowRights = 0;  /* started as low integiry process,
 			need to use alternate untrustedUserDirectory */
 #endif /* VISTA_SECURITY */
@@ -187,12 +188,8 @@ extern sqInt primitiveFailForFFIExceptionat(usqLong exceptionCode, usqInt pc);
   DWORD result;
 
   /* #1: Try to handle exception in the regular (memory access)
-     exception filter if virtual memory support is enabled */
-#ifndef NO_VIRTUAL_MEMORY
+     exception filter */
   result = sqExceptionFilter(exp);
-#else
-  result = EXCEPTION_CONTINUE_SEARCH;
-#endif
 
   /* #2: If that didn't work, try to handle any FP problems */
   if (result != EXCEPTION_CONTINUE_EXECUTION) {
@@ -248,7 +245,7 @@ fopen_for_append(WCHAR *filename)
 		? _wfopen(filename,L"r+")
 		: _wfopen(filename,L"w+");
 	if (f)
-		fseek(f,0,SEEK_END);
+		_fseeki64(f,0,SEEK_END);
 	return f;
 }
 #else
@@ -286,7 +283,7 @@ OutputLogMessageW(WCHAR *string)
 
 static int
 OutputConsoleString(char *string)
-{ 
+{
   int pos;
 
   if (fDynamicConsole && !fShowConsole) {
@@ -326,7 +323,7 @@ int __cdecl DPRINTF(const char *fmt, ...)
   return 1;
 }
 
-#if !defined(_MSC_VER) && !defined(NODBGPRINT)
+#if defined(DBGPRINT)
 
 // redefining printf doesn't seem like a good idea to me...
 
@@ -369,7 +366,7 @@ fprintf(FILE *fp, const char *fmt, ...)
 int __cdecl
 putchar(int c) { return printf("%c",c); }
 
-#endif /* !defined(_MSC_VER) && !defined(NODBGPRINT) */
+#endif /* defined(DBGPRINT) */
 
 /****************************************************************************/
 /*                   Message Processing                                     */
@@ -543,7 +540,7 @@ void gatherSystemInfo(void) {
     HANDLE hUser = LoadLibraryA( "user32.dll" );
     ZeroMemory(&gDev, sizeof(gDev));
     gDev.cb = sizeof(gDev);
-	if(hUser) {
+	if (hUser) {
       pfnEnumDisplayDevices pEnumDisplayDevices = (pfnEnumDisplayDevices)
               GetProcAddress(hUser, "EnumDisplayDevicesA");
       if (pEnumDisplayDevices) pEnumDisplayDevices(NULL, 0, &gDev, 0);
@@ -650,10 +647,10 @@ void gatherSystemInfo(void) {
 # define wSuiteMask wReserved[0]
 # define wProductType wReserved[1] & 0xFF
 #endif
-#ifdef UNICODE
+#if _UNICODE
 	{
 		char buf[128 * 3];
-		if(WideCharToMultiByte(CP_UTF8,0, osInfo.szCSDVersion,-1,buf,sizeof(buf),NULL,NULL))
+		if (WideCharToMultiByte(CP_UTF8,0, osInfo.szCSDVersion,-1,buf,sizeof(buf),NULL,NULL))
 		  snprintf(tmpString, sizeof(tmpString),
             "Operating System: %s (Build %lu %s)\n"
             "\tRegistered Owner: %s\n"
@@ -686,10 +683,10 @@ void gatherSystemInfo(void) {
     osInfoString = _strdup(tmpString);
   }
 
-#ifdef UNICODE
+#if _UNICODE
   {
 	  char buf[128*3];
-	  if(WideCharToMultiByte(CP_UTF8,0,gDev.DeviceString,-1,buf,sizeof(buf),NULL,NULL)) snprintf(tmpString, sizeof(tmpString),
+	  if (WideCharToMultiByte(CP_UTF8,0,gDev.DeviceString,-1,buf,sizeof(buf),NULL,NULL)) snprintf(tmpString, sizeof(tmpString),
 		  "Display Information: \n"
 		  "\tGraphics adapter name: %s\n"
 		  "\tPrimary monitor resolution: %d x %d\n",
@@ -798,7 +795,7 @@ void gatherSystemInfo(void) {
 				   &vInfo, &vLen)) {
             int utf8_len = WideCharToMultiByte(CP_UTF8, 0, vInfo, -1, NULL, 0, NULL, NULL);
 			char *utf8 = (char *)malloc(utf8_len);
-			if(utf8) {
+			if (utf8) {
               WideCharToMultiByte(CP_UTF8, 0, vInfo, -1, utf8, utf8_len, NULL, NULL);
               strncat(tmpString, utf8,sizeof(tmpString) - 1 - strlen(tmpString));
               free(utf8);
@@ -903,7 +900,7 @@ sqInt  fileHandleType(HANDLE fdHandle) {
 	if (fdHandle == INVALID_HANDLE_VALUE) {
 		return -1;
 	}
-	
+
 	/* In case of Windows Shell case */
 	DWORD fileType = GetFileType(fdHandle);
 	if (fileType == FILE_TYPE_CHAR)
@@ -912,7 +909,7 @@ sqInt  fileHandleType(HANDLE fdHandle) {
 		return 1;
 
 	/* In case of Unix emulator, we need to parse the name of the pipe */
-	
+
 	/* Cygwin/msys's pty is a pipe. */
 	if (fileType != FILE_TYPE_PIPE) {
 		if (fileType == FILE_TYPE_DISK)
@@ -921,7 +918,7 @@ sqInt  fileHandleType(HANDLE fdHandle) {
 			return  0; //No stdio allocated
 		return  -1;
 	}
-	
+
 	int size = sizeof(FILE_NAME_INFO) + sizeof(WCHAR) * MAX_PATH;
 	FILE_NAME_INFO *nameinfo;
 	WCHAR *p = NULL;
@@ -977,7 +974,7 @@ sqInt  isFileHandleATTY(HANDLE fdHandle) {
 * 1 if one of the stdio is redirected to a console pipe, else 0 (and in this case, a file should be created)
 */
 sqInt  isOneStdioDescriptorATTY() {
-	return isFileHandleATTY(GetStdHandle(STD_INPUT_HANDLE)) || 
+	return isFileHandleATTY(GetStdHandle(STD_INPUT_HANDLE)) ||
 		isFileHandleATTY(GetStdHandle(STD_OUTPUT_HANDLE)) || isFileHandleATTY(GetStdHandle(STD_ERROR_HANDLE));
 }
 
@@ -1011,14 +1008,14 @@ void SetupStderr()
   *stderrName = *stdoutName = 0;
   /* re-open stdout && stderr */
   GetTempPathW(MAX_PATH,tmpName);
-  if(GetStdHandle(STD_ERROR_HANDLE) == INVALID_HANDLE_VALUE)
+  if (GetStdHandle(STD_ERROR_HANDLE) == INVALID_HANDLE_VALUE)
     {
       GetTempFileNameW(tmpName,L"sq",0,stderrName);
       _wfreopen(stderrName,L"w+t",stderr);
     }
   else *stderrName = 0;
 
-  if(GetStdHandle(STD_OUTPUT_HANDLE) == INVALID_HANDLE_VALUE)
+  if (GetStdHandle(STD_OUTPUT_HANDLE) == INVALID_HANDLE_VALUE)
     {
       GetTempFileNameW(tmpName,L"sq",0,stdoutName);
       _wfreopen(stdoutName,L"w+t",stdout);
@@ -1133,7 +1130,7 @@ extern char *__cogitBuildInfo;
 static int inError = 0;
 
 void
-error(char *msg) {
+error(const char *msg) {
   FILE *f;
   WCHAR crashInfo[1024];
   void *callstack[MAXFRAMES];
@@ -1149,7 +1146,7 @@ error(char *msg) {
   inError = 1;
   nframes = backtrace(callstack, MAXFRAMES);
   symbolic_backtrace(++nframes, callstack, symbolic_pcs);
-  
+
   len = MultiByteToWideChar(CP_UTF8, 0, msg, -1, NULL, 0);
   if (len > 0) {
     msgW = alloca(len * sizeof(WCHAR));
@@ -1172,7 +1169,7 @@ error(char *msg) {
       methodPrimitiveIndex(),
       vmLogDirW,
       L"crash.dmp");
-  if(!fHeadlessImage)
+  if (!fHeadlessImage)
     MessageBoxW(stWindow,crashInfo,L"Fatal VM error",
                  MB_OK | MB_APPLMODAL | MB_ICONSTOP);
 
@@ -1181,7 +1178,7 @@ error(char *msg) {
 #endif
   /* print the above information */
   f = fopen_for_append(L"crash.dmp");
-  if(f){  
+  if (f){
     time_t crashTime = time(NULL);
     fprintf(f,"---------------------------------------------------------------------\n");
     fprintf(f,"%s %s\n\n", ctime(&crashTime), GetAttributeString(0));
@@ -1231,7 +1228,7 @@ extern sqInt reportStackHeadroom;
 
 static void
 printCrashDebugInformation(LPEXCEPTION_POINTERS exp)
-{ 
+{
   void *callstack[MAXFRAMES];
   symbolic_pc symbolic_pcs[MAXFRAMES];
   int nframes, inVMThread;
@@ -1283,7 +1280,7 @@ printCrashDebugInformation(LPEXCEPTION_POINTERS exp)
 	   inVMThread ? L"the VM" : L"some other",
 	   vmLogDirW,
 	   L"crash.dmp");
-  if(!fHeadlessImage)
+  if (!fHeadlessImage)
     MessageBoxW(stWindow,crashInfo,L"Fatal VM error",
                  MB_OK | MB_APPLMODAL | MB_ICONSTOP);
 
@@ -1292,7 +1289,7 @@ printCrashDebugInformation(LPEXCEPTION_POINTERS exp)
 #endif
   /* print the above information */
   f = fopen_for_append(L"crash.dmp");
-  if(f){  
+  if (f){
     time_t crashTime = time(NULL);
     fprintf(f,"---------------------------------------------------------------------\n");
     fprintf(f,"%s\n", ctime(&crashTime));
@@ -1301,7 +1298,7 @@ printCrashDebugInformation(LPEXCEPTION_POINTERS exp)
 	    exp->ExceptionRecord->ExceptionCode,
 		(int) sizeof(exp->ExceptionRecord->ExceptionAddress)*2,
 	    (usqIntptr_t) exp->ExceptionRecord->ExceptionAddress);
-    if(exp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+    if (exp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
 		/* For access violations print what actually happened */
 		fprintf(f,"Access violation (%s) at %0*" PRIXSQPTR "\n",
 			(exp->ExceptionRecord->ExceptionInformation[0] ? "write access" : "read access"),
@@ -1380,7 +1377,7 @@ printCrashDebugInformation(LPEXCEPTION_POINTERS exp)
 
   } EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
     /* that's too bad ... */
-    if(!fHeadlessImage)
+    if (!fHeadlessImage)
       MessageBox(0,TEXT("The VM has crashed. Sorry."),TEXT("Fatal error:"),
                  MB_OK | MB_APPLMODAL | MB_ICONSTOP);
     else
@@ -1398,17 +1395,17 @@ void __cdecl Cleanup(void)
   ioReleaseTime();
   /* tricky ... we have no systray icon when running
      headfull or when running as service on NT */
-  if(fHeadlessImage && (!fRunService))
+  if (fHeadlessImage && (!fRunService))
     SetSystemTrayIcon(0);
-  if(palette) DeleteObject(palette);
+  if (palette) DeleteObject(palette);
   PROFILE_SHOW(ticksForReversal);
   PROFILE_SHOW(ticksForBlitting);
-  if(*stderrName)
+  if (*stderrName)
     {
       fclose(stderr);
       _wremove(stderrName);
     }
-  if(*stdoutName)
+  if (*stdoutName)
     {
       fclose(stdout);
       _wremove(stdoutName);
@@ -1432,7 +1429,7 @@ sqImageFile findEmbeddedImage(void) {
 	int length;
 
 	f = sqImageFileOpen(vmNameA, "rb");
-	if(!f) {
+	if (!f) {
 		MessageBox(0,"Error opening VM",VM_NAME,MB_OK);
 		return 0;
 	}
@@ -1443,7 +1440,7 @@ sqImageFile findEmbeddedImage(void) {
 	sqImageFileRead(&start, 1, 4, f);
 	sqMessageBox(MB_OK, TEXT("Magic number", "Expected:\t%x\nFound:\t\t%x"), SQ_IMAGE_MAGIC, magic);
 	/* Magic number must be okay and start must be within executable boundaries */
-	if(magic != SQ_IMAGE_MAGIC || start < 0 || start >= endMarker) {
+	if (magic != SQ_IMAGE_MAGIC || start < 0 || start >= endMarker) {
 		/* nope */
 		sqImageFileClose(f);
 		return 0;
@@ -1452,14 +1449,14 @@ sqImageFile findEmbeddedImage(void) {
 	sqImageFileSeek(f,start);
 	sqImageFileRead(&magic, 1, 4, f);
 	sqMessageBox(MB_OK, TEXT("Magic number", "Expected:\t%x\nFound:\t\t%x"), SQ_IMAGE_MAGIC, magic);
-	if(magic != SQ_IMAGE_MAGIC) {
+	if (magic != SQ_IMAGE_MAGIC) {
 		/* nope */
 		sqImageFileClose(f);
 		return 0;
 	}
 	/* now triple check for image format */
 	sqImageFileRead(&magic, 1, 4, f);
-	if(!readableFormat(magic) && !readableFormat(byteSwapped(magic)) {
+	if (!readableFormat(magic) && !readableFormat(byteSwapped(magic)) {
 		/* nope */
 		sqImageFileClose(f);
 		return 0;
@@ -1480,7 +1477,7 @@ sqImageFile findEmbeddedImage(void) { return 0; }
 /*                        sqMain                                            */
 /****************************************************************************/
 #if (STACKVM || NewspeakVM) && !COGVM
-extern sqInt sendTrace;
+extern volatile int sendTrace;
 #endif
 #if STACKVM || NewspeakVM
 extern sqInt checkForLeaks;
@@ -1500,7 +1497,7 @@ extern sqInt minBackwardJumpCountForCompile;
 #endif /* COGVM */
 
 
-/* sqMain: 
+/* sqMain:
 	This is common entry point regardless of whether we're running as a normal
 	app or as a service. Note that a number of things may have been set up
 	before coming here. In particular,
@@ -1513,7 +1510,7 @@ static int parseArguments(int argc, char *argv[]);
 
 int
 sqMain(int argc, char *argv[])
-{ 
+{
   int virtualMemory;
 
   /* set default fpu control word */
@@ -1522,16 +1519,16 @@ sqMain(int argc, char *argv[])
   LoadPreferences();
 
   /* If running as single app, find the previous instance */
-  if(fRunSingleApp) {
+  if (fRunSingleApp) {
     HWND win = GetTopWindow(0);
     while (win != NULL) {
       TCHAR buf[MAX_PATH];
       GetClassName(win, buf, MAX_PATH);
-      if(_tcscmp(windowClassName, buf) == 0) break;
+      if (_tcscmp(windowClassName, buf) == 0) break;
       win = GetNextWindow(win, GW_HWNDNEXT);
     }
 
-    if(win) {
+    if (win) {
 	  WCHAR *cmdLineW = GetCommandLineW();
       /* An instance is running already. Inform it about the app. */
       int bytes = (wcslen(cmdLineW)+1) * sizeof(WCHAR);
@@ -1545,7 +1542,7 @@ sqMain(int argc, char *argv[])
       SetClipboardData(CF_UNICODETEXT, h);
       CloseClipboard();
 
-      if(IsIconic(win)) ShowWindow(win, SW_RESTORE);
+      if (IsIconic(win)) ShowWindow(win, SW_RESTORE);
       SetForegroundWindow(win);
       SetActiveWindow(win);
       return PostMessage(win, SQ_LAUNCH_DROP, 0, 0);
@@ -1553,19 +1550,19 @@ sqMain(int argc, char *argv[])
   }
 
   /* parse command line args */
-  if(!parseArguments(argc, argv))
+  if (!parseArguments(argc, argv))
     return printUsage(1);
 
   /* a quick check if we have any argument at all */
-  if(!fRunService && (*imageName == 0)) {
+  if (!fRunService && (*imageName == 0)) {
     /* Check if the image is embedded */
     imageFile = findEmbeddedImage();
-    if(!imageFile) {
+    if (!imageFile) {
       /* Search the current directory if there's a single image file */
-      if(!findImageFile()) {
+      if (!findImageFile()) {
 	/* Nope. Give the user a chance to open an image interactively */
-	
-          if(fHeadlessImage || !openImageFile()) return -1; /* User cancelled file open */
+
+          if (fHeadlessImage || !openImageFile()) return -1; /* User cancelled file open */
       }
     }
   }
@@ -1583,9 +1580,9 @@ sqMain(int argc, char *argv[])
   OleInitialize(NULL);
 
   /* Give us some log information when running as service */
-  if(fRunService) { 
+  if (fRunService) {
     time_t svcStart;
-    
+
     svcStart = time(NULL);
     OutputLogMessage("\n\n");
     OutputLogMessage(ctime(&svcStart));
@@ -1603,7 +1600,7 @@ sqMain(int argc, char *argv[])
 
 #ifndef NO_SERVICE
   /* if service installing is requested, do so */
-  if(installServiceName && *installServiceName) {
+  if (installServiceName && *installServiceName) {
     wcscpy(serviceName, installServiceName);
     sqServiceInstall();
     /* When installing was successful we won't come
@@ -1615,46 +1612,31 @@ sqMain(int argc, char *argv[])
   /* initialisation */
   SetupWindows();
   SetupPixmaps();
-  { extern void ioInitTime(void);
-	extern void ioInitThreads(void);
-	ioInitTime();
-	ioInitThreads();
+  ioInitTime();
+  ioInitThreads();
 # if !COGMTVM
-	/* Set the current VM thread.  If the main thread isn't the VM thread then
-	 * when that thread is spawned it can reassign ioVMThread.
-	 */
-	ioVMThread = ioCurrentOSThread();
+  /* Set the current VM thread.  If the main thread isn't the VM thread then
+   * when that thread is spawned it can reassign ioVMThread.
+   */
+  ioVMThread = ioCurrentOSThread();
 # endif
-  }
 
   /* check the interpreter's size assumptions for basic data types */
   if (sizeof(int) != 4) error("This C compiler's integers are not 32 bits.");
   if (sizeof(sqLong) != 8) error("This C compiler's long longs are not 64 bits.");
   if (sizeof(double) != 8) error("This C compiler's floats are not 64 bits.");
-#if 0
-  if (sizeof(time_t) != 4) error("This C compiler's time_t's are not 32 bits.");
-#endif
 
 
-  if(!imageFile) {
+  if (!imageFile) {
     imageSize = SqueakImageLength(imageNameW);
-    if(imageSize == 0) printUsage(2);
+    if (imageSize == 0) printUsage(2);
   }
 
   /* allocate this before anything is going to happen */
   vmWakeUpEvent = CreateEvent(NULL, 1, 0, NULL);
 
-#ifdef NO_VIRTUAL_MEMORY
-  if(!dwMemorySize) {
-    dwMemorySize = 4;
-    virtualMemory = (int)imageSize + max(imageSize, dwMemorySize * 0x00100000);
-  } else {
-    virtualMemory = (int)dwMemorySize * 0x00100000;
-  }
-#else
   /* initial commit size = imageSize + 4MB */
   virtualMemory = imageSize + 0x00400000;
-#endif
 
 #if !NO_FIRST_LEVEL_EXCEPTION_HANDLER
 # ifndef _MSC_VER
@@ -1667,12 +1649,12 @@ sqMain(int argc, char *argv[])
 
 #if !NewspeakVM
     /* set the CWD to the image location */
-    if(*imageNameW) {
+    if (*imageNameW) {
       WCHAR path[MAX_PATH+1], *ptr;
       wcsncpy(path,imageNameW,MAX_PATH);
 	  path[MAX_PATH] = 0;
       ptr = wcsrchr(path, '\\');
-      if(ptr) {
+      if (ptr) {
         *ptr = 0;
         SetCurrentDirectoryW(path);
       }
@@ -1684,11 +1666,11 @@ sqMain(int argc, char *argv[])
 
     /* if headless running is requested, try to to create an icon
        in the Win95/NT system tray */
-    if(fHeadlessImage && (!fRunService))
+    if (fHeadlessImage && (!fRunService))
       SetSystemTrayIcon(1);
-    
+
     /* read the image file */
-    if(!imageFile) {
+    if (!imageFile) {
       imageFile = sqImageFileOpen(imageName,"rb");
       readImageFromFileHeapSizeStartingAt(imageFile, virtualMemory, 0);
     } else {
@@ -1696,7 +1678,7 @@ sqMain(int argc, char *argv[])
     }
     sqImageFileClose(imageFile);
 
-    if(fHeadlessImage) HideSplashScreen(); /* need to do it manually */
+    if (fHeadlessImage) HideSplashScreen(); /* need to do it manually */
     SetWindowSize();
     ioSetFullScreen(getFullScreenFlag());
 
@@ -1785,8 +1767,8 @@ WinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
      if somebody out there knows how to find out when we're starting
      as a service - LET ME KNOW!
   */
-  if(!*lpCmdLine)          /* No command line */
-    if(sqServiceMain())    /* try starting the service */
+  if (!*lpCmdLine)          /* No command line */
+    if (sqServiceMain())    /* try starting the service */
       return 0;            /* service was run - exit */
 #endif
 
@@ -1842,8 +1824,8 @@ main(int argc, char *argv[])
      if somebody out there knows how to find out when we're starting
      as a service - LET ME KNOW!
   */
-  if(!*lpCmdLine)          /* No command line */
-    if(sqServiceMain())    /* try starting the service */
+  if (!*lpCmdLine)          /* No command line */
+    if (sqServiceMain())    /* try starting the service */
       return 0;            /* service was run - exit */
 #endif
 
@@ -1856,8 +1838,9 @@ main(int argc, char *argv[])
   return 0;
 }
 #endif /* (!defined(__MINGW32__) && !defined(__MINGW64__)) */
-static sqIntptr_t	
-strtobkm(const char *str)	
+
+static sqIntptr_t
+strtobkm(const char *str)
 {
 	char *suffix;
 #if SQ_HOST64
@@ -1866,8 +1849,25 @@ strtobkm(const char *str)
 	sqIntptr_t value = strtol(str, &suffix, 10);
 #endif
 	switch (*suffix) {
-	case 'k': case 'K': value *= 1024; break;
-	case 'm': case 'M': value *= 1024*1024; break;
+	case 'k': case 'K': return value * 1024ULL;
+	case 'm': case 'M': return value * 1024ULL*1024ULL;
+	}
+	return value;
+}
+
+static usqIntptr_t
+strtobkmg(const char *str)
+{
+	char *suffix;
+#if SQ_HOST64
+	sqIntptr_t value = strtoll(str, &suffix, 10);
+#else
+	sqIntptr_t value = strtol(str, &suffix, 10);
+#endif
+	switch (*suffix) {
+	case 'k': case 'K': return value * 1024ULL;
+	case 'm': case 'M': return value * 1024ULL*1024ULL;
+	case 'g': case 'G': return value * 1024ULL*1024ULL*1024ULL;
 	}
 	return value;
 }
@@ -1893,7 +1893,7 @@ parseVMArgument(int argc, char *argv[])
 #endif /* VISTA_SECURITY */
 #if (STACKVM || NewspeakVM) && !COGVM
 	else if (!strcmp(argv[0], VMOPTION("sendtrace")))
-		{ extern sqInt sendTrace; sendTrace = 1; return 1; }
+		{ extern volatile int sendTrace; sendTrace = 1; return 1; }
 #endif
 
 	/* parameters */
@@ -1922,11 +1922,11 @@ parseVMArgument(int argc, char *argv[])
 		return 1;
 	}
 	else if (argc > 1 && !strcmp(argv[0], VMOPTION("memory"))) {
-		dwMemorySize = strtobkm(argv[1]);
+		dwMemorySize = strtobkmg(argv[1]);
 		return 2;
 	}
 	else if (!strncmp(argv[0], VMOPTION("memory:"), strlen(VMOPTION("memory:")))) {
-		dwMemorySize = strtobkm(argv[0] + strlen(VMOPTION("memory:")));
+		dwMemorySize = strtobkmg(argv[0] + strlen(VMOPTION("memory:")));
 		return 1;
 	}
 #if STACKVM || NewspeakVM
@@ -1956,27 +1956,27 @@ parseVMArgument(int argc, char *argv[])
 		return 1; }
 	else if (argc > 1 && !strcmp(argv[0], VMOPTION("eden"))) {
 		extern sqInt desiredEdenBytes;
-		desiredEdenBytes = strtobkm(argv[1]);	 
+		desiredEdenBytes = strtobkmg(argv[1]);
 		return 2; }
 	else if (!strncmp(argv[0], VMOPTION("eden:"), strlen(VMOPTION("eden:")))) {
 		extern sqInt desiredEdenBytes;
-		desiredEdenBytes = strtobkm(argv[0]+strlen(VMOPTION("eden:")));	 
+		desiredEdenBytes = strtobkmg(argv[0]+strlen(VMOPTION("eden:")));
 		return 1; }
 	else if (argc > 1 && !strcmp(argv[0], VMOPTION("leakcheck"))) {
 		extern sqInt checkForLeaks;
-		checkForLeaks = atoi(argv[1]);	 
+		checkForLeaks = atoi(argv[1]);
 		return 2; }
 	else if (!strncmp(argv[0], VMOPTION("leakcheck:"), strlen(VMOPTION("leakcheck:")))) {
 		extern sqInt checkForLeaks;
-		checkForLeaks = atoi(argv[0]+strlen(VMOPTION("leakcheck:")));	 
+		checkForLeaks = atoi(argv[0]+strlen(VMOPTION("leakcheck:")));
 		return 1; }
 	else if (argc > 1 && !strcmp(argv[0], VMOPTION("stackpages"))) {
 		extern sqInt desiredNumStackPages;
-		desiredNumStackPages = atoi(argv[1]);	 
+		desiredNumStackPages = atoi(argv[1]);
 		return 2; }
 	else if (!strncmp(argv[0], VMOPTION("stackpages:"), strlen(VMOPTION("stackpages:")))) {
 		extern sqInt desiredNumStackPages;
-		desiredNumStackPages = atoi(argv[0]+strlen(VMOPTION("stackpages:")));	 
+		desiredNumStackPages = atoi(argv[0]+strlen(VMOPTION("stackpages:")));
 		return 1; }
 	else if (!strcmp(argv[0], VMOPTION("noheartbeat"))) {
 		extern sqInt suppressHeartbeatFlag;
@@ -1998,7 +1998,7 @@ parseVMArgument(int argc, char *argv[])
 #if COGVM
 	else if (argc > 1 && !strcmp(argv[0], VMOPTION("codesize"))) {
 		extern sqInt desiredCogCodeSize;
-		desiredCogCodeSize = strtobkm(argv[1]);	 
+		desiredCogCodeSize = strtobkm(argv[1]);
 		return 2; }
 # define TLSLEN (sizeof(VMOPTION("trace"))-1)
 	else if (!strncmp(argv[0], VMOPTION("trace"), TLSLEN)) {
@@ -2021,7 +2021,7 @@ parseVMArgument(int argc, char *argv[])
 		return 1; }
 	else if (argc > 1 && !strcmp(argv[0], VMOPTION("cogmaxlits"))) {
 		extern sqInt maxLiteralCountForCompile;
-		maxLiteralCountForCompile = strtobkm(argv[1]);	 
+		maxLiteralCountForCompile = strtobkm(argv[1]);
 		return 2; }
 	else if (!strncmp(argv[0], VMOPTION("cogmaxlits:"), strlen(VMOPTION("cogmaxlits:")))) {
 		extern sqInt maxLiteralCountForCompile;
@@ -2029,7 +2029,7 @@ parseVMArgument(int argc, char *argv[])
 		return 1; }
 	else if (argc > 1 && !strcmp(argv[0], VMOPTION("cogminjumps"))) {
 		extern sqInt minBackwardJumpCountForCompile;
-		minBackwardJumpCountForCompile = strtobkm(argv[1]); 
+		minBackwardJumpCountForCompile = strtobkm(argv[1]);
 		return 2; }
 	else if (!strncmp(argv[0], VMOPTION("cogminjumps:"),strlen(VMOPTION("cogminjumps:")))) {
 		extern sqInt minBackwardJumpCountForCompile;
@@ -2043,10 +2043,10 @@ parseVMArgument(int argc, char *argv[])
 #endif /* COGVM */
 #if SPURVM
     else if (argc > 1 && !strcmp(argv[0], VMOPTION("maxoldspace"))) {
-		maxOldSpaceSize = (usqInt) strtobkm(argv[1]);	 
+		maxOldSpaceSize = (usqInt) strtobkmg(argv[1]);
 		return 2; }
     else if (!strncmp(argv[0], VMOPTION("maxoldspace:"), strlen(VMOPTION("maxoldspace:")))) {
-		maxOldSpaceSize = (usqInt) strtobkm(argv[0]+strlen(VMOPTION("maxoldspace:")));
+		maxOldSpaceSize = (usqInt) strtobkmg(argv[0]+strlen(VMOPTION("maxoldspace:")));
 		return 2; }
 	else if (!strcmp(argv[0], VMOPTION("logscavenge"))) {
 		extern void openScavengeLog(void);
@@ -2066,9 +2066,9 @@ parseVMArgs(int argc, char *argv[])
 
 	while (++i < argc && *argv[i] == '-' && strcmp(argv[i],"--")) {
         ddash= (argv[i][1] == '-');
-        if(ddash) argv[i]++;
+        if (ddash) argv[i]++;
         n = parseVMArgument(argc - i, argv + i);
-        if(ddash) argv[i]--;
+        if (ddash) argv[i]--;
         if (n > 0) {
 			for (j = 0; j < n; j++)
 				vmOptions[numOptionsVM++] = argv[i+j];
@@ -2084,25 +2084,30 @@ parseVMArgs(int argc, char *argv[])
 
 static int
 IsImage(char *name)
-{ 
+{
 	int magic;
 	extern sqInt byteSwapped(sqInt);
 	sqImageFile fp;
 
 	fp = sqImageFileOpen(name,"rb");
-	if(!fp) return 0; /* not an image */
-	if(sqImageFileRead(&magic, 1, sizeof(magic), fp) != sizeof(magic)) {
+	if (!fp)
+		return 0; /* not an image */
+	if (sqImageFileSize(fp) < (64 * 1024)) {
 		sqImageFileClose(fp);
 		return 0;
 	}
-	if(readableFormat(magic) || readableFormat(byteSwapped(magic))) {
+	if (sqImageFileRead(&magic, 1, sizeof(magic), fp) != sizeof(magic)) {
+		sqImageFileClose(fp);
+		return 0;
+	}
+	if (readableFormat(magic) || readableFormat(byteSwapped(magic))) {
 		sqImageFileClose(fp);
 		return true;
 	}
 
 	/* no luck at beginning of file, seek to 512 and try again */
-	sqImageFileSeek( fp, 512);
-	if(sqImageFileRead(&magic, 1, sizeof(magic), fp) != sizeof(magic)) {
+	sqImageFileSeek(fp, 512);
+	if (sqImageFileRead(&magic, 1, sizeof(magic), fp) != sizeof(magic)) {
 		sqImageFileClose(fp);
 		return 0;
 	}
@@ -2123,7 +2128,7 @@ SubsystemType()
     IMAGE_DOS_HEADER      image_dos_header;
     IMAGE_OPTIONAL_HEADER image_optional_header;
 
-    /* Open the reference file. */ 
+    /* Open the reference file. */
     hImage = CreateFileW(vmNameW,
                         GENERIC_READ,
                         FILE_SHARE_READ,
@@ -2135,7 +2140,7 @@ SubsystemType()
     if (INVALID_HANDLE_VALUE == hImage)
 		return -1;
 
-    /* Read the MS-DOS image header. */ 
+    /* Read the MS-DOS image header. */
     if (!ReadFile(hImage, &image_dos_header, sizeof(IMAGE_DOS_HEADER), &bytes, 0)
 	 || bytes != sizeof(IMAGE_DOS_HEADER))
 		return -2;
@@ -2143,7 +2148,7 @@ SubsystemType()
     if (image_dos_header.e_magic != IMAGE_DOS_SIGNATURE)
 		return -3;
 
-    /* Get actual COFF header. */ 
+    /* Get actual COFF header. */
     if (SetFilePointer(	hImage,
 						image_dos_header.e_lfanew,
 						0,
@@ -2163,7 +2168,7 @@ SubsystemType()
 						FILE_CURRENT) == 0xFFFFFFFF)
 		return -7;
 
-    /* Read optional header. */ 
+    /* Read optional header. */
     if (!ReadFile(hImage, &image_optional_header, IMAGE_SIZEOF_NT_OPTIONAL_HEADER, &bytes, 0)
 	 || bytes != IMAGE_SIZEOF_NT_OPTIONAL_HEADER)
 		return -8;
@@ -2189,22 +2194,20 @@ parseGenericArgs(int argc, char *argv[])
 			return imageName != 0;
 		}
 
-	if (*imageName == 0) { /* only try to use image name if none is provided */
-		if (*argv[0] && IsImage(argv[0])) {
-			strncpy(imageName, argv[0],MAX_PATH_UTF8);
-			MultiByteToWideChar(CP_UTF8, 0, imageName, -1, imageNameW, MAX_PATH);
-			/* if provided, the image is a vm argument. */
-			vmOptions[numOptionsVM++] = argv[0];
-		}
+	/* Always allow the command-line to override an implicit image name. */
+	if (*argv[0] && IsImage(argv[0])) {
+		strncpy(imageName, argv[0], MAX_PATH_UTF8);
+		MultiByteToWideChar(CP_UTF8, 0, imageName, -1, imageNameW, MAX_PATH);
+		/* if provided, the image is a vm argument. */
+		vmOptions[numOptionsVM++] = argv[0];
 	}
-	else /* provide image name as second argument if implicitly specified */
+	else if (*imageName) /* provide image name as second argument if implicitly specified */
 		imageOptions[numOptionsImage++] = imageName;
 
-	imageOptions[numOptionsImage++] = argv[0];
-	for (i = 1; i < argc; i++)
+	for (i = 0; i < argc; i++)
 		imageOptions[numOptionsImage++] = argv[i];
 
-  return 1;
+	return 1;
 }
 
 static int
@@ -2243,7 +2246,7 @@ isCFramePointerInUse(usqIntptr_t *cFrmPtrPtr, usqIntptr_t *cStkPtrPtr)
 	return *cFrmPtrPtr >= *cStkPtrPtr && *cFrmPtrPtr <= currentCSP;
 }
 # else
-#	error please provide a deifnition of isCFramePointerInUse for this platform
+#	error please provide a definition of isCFramePointerInUse for this platform
 # endif /* defined(_M_IX86) et al */
 
 /* Answer an approximation of the size of the redzone (if any).  Do so by

@@ -42,13 +42,13 @@ osCogStackPageHeadroom(void)
     return 1024;
 }
 
-long
+unsigned int
 ioMSecs(void)
 {
     return 0;
 }
 
-long
+unsigned int
 ioMicroMSecs(void)
 {
     return 0;
@@ -186,12 +186,6 @@ unsigned long
 ioHeartbeatFrequency(int frequency)
 {
     return 0;
-}
-
-void
-ioProfileStatus(sqInt *running, void **exestartpc, void **exelimitpc,
-					  void **vmhst, long *nvmhbin, void **eahst, long *neahbin)
-{
 }
 
 void

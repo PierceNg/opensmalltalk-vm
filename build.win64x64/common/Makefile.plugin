@@ -69,7 +69,7 @@ NDEBUG:=
 endif
 
 XDEFS:=	
-DEFS:=	$(WINVER) -DWIN64=1 -DWIN32_FILE_SUPPORT -DNO_ISNAN \
+DEFS:=	$(WINVER) -DWIN64=1 -DNO_ISNAN \
 		-DNO_SERVICE \
 		$(NDEBUG) -DLSB_FIRST -DVM_NAME=\"$(VM)\" $(XDEFS)
 
@@ -145,28 +145,28 @@ $(PLUGINDLL): $(VMDIR) $(OBJDIR) $(LIBOBJ)
 		--output-exp $(OBJDIR)/$(LIBNAME).exp \
 		--output-lib $(OBJDIR)/$(LIBNAME).lib \
 		$(DLLTOOLEXTRAS) \
-		$(LIBOBJ)
+		$(LIBOBJ) $(JMPOBJ)
 ifneq ($(LINK_WITH_GCC),)
 	$(CC) -shared \
 		-m64 \
 		-def $(OBJDIR)/$(LIBNAME).def \
 		-o   $(VMDIR)/$(LIBNAME).dll \
 		$(GCCLINKEXTRAS) \
-		$(LIBOBJ) $(EXTRALIBS)
+		$(LIBOBJ) $(JMPOBJ) $(VMLIB) $(EXTRALIBS)
 else ifneq ($(LINK_WITH_GPP),)
 	$(CXX) -shared \
 		-m64 \
 		-def $(OBJDIR)/$(LIBNAME).def \
 		-o   $(VMDIR)/$(LIBNAME).dll \
 		$(GPPLINKEXTRAS) \
-		$(LIBOBJ) $(EXTRALIBS)
+		$(LIBOBJ) $(JMPOBJ) $(VMLIB) $(EXTRALIBS)
 else
 	$(DLLWRAP) -mwindows -m64 \
 		-def $(OBJDIR)/$(LIBNAME).def \
 		-o   $(VMDIR)/$(LIBNAME).dll \
 		$(DLLWRAPEXTRAS) \
 		$(OBJDIR)/$(LIBNAME).exp \
-		$(LIBOBJ) $(EXTRALIBS)
+		$(LIBOBJ) $(JMPOBJ) $(VMLIB) $(EXTRALIBS)
 endif
 	$(OPTSTRIP) --strip-all $(VMDIR)/$(LIBNAME).dll
 	-$(RM) $(OBJDIR)/$(LIBNAME).lib
