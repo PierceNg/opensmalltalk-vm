@@ -20,3 +20,4 @@ LIBDIR="`echo lib/squeak/[0-9.-]*`"
 test -f $LIBDIR/squeak && mv $LIBDIR/squeak $LIBDIR/pharo
 test -d lib/squeak && mv lib/squeak lib/pharo
 
+true

@@ -75,7 +75,7 @@ else()
         set(OpenSSL_BuildCommand make)
     else(UNIX)
         if(SQUEAK_PLATFORM_X86_64)
-            set(OpenSSL_ConfigureCommand "./Configure" linux-generic32
+            set(OpenSSL_ConfigureCommand "./config" 
                 "--prefix=${ThirdPartyCacheInstall}" shared)
         elseif(SQUEAK_PLATFORM_X86_32)
             set(OpenSSL_ConfigureCommand setarch i386 ./config -m32
