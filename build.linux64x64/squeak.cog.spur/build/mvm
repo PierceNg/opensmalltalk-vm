@@ -5,7 +5,7 @@ INSTALLDIR=sqcogspur64linuxht
 # Some gcc versions create a broken VM using -O2
 OPT="-g -O2 -DNDEBUG -DDEBUGVM=0"
 
-CFLAGS="$OPT -msse2 -DCOGMTVM=0"
+CFLAGS="$OPT -msse2 -DCOGMTVM=0 -I../../../.thirdparty-cache/linux/x86_64/include"
 LIBS=""
 LDFLAGS=""
 case $(uname -s) in
