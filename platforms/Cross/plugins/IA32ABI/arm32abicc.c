@@ -140,8 +140,6 @@ getMostRecentCallbackContext() { return mostRecentCallbackContext; }
 #define getMRCC()   mostRecentCallbackContext
 #define setMRCC(t) (mostRecentCallbackContext = (void *)(t))
 
-extern void error(char *s);
-
 /*
  * Entry-point for call-back thunks.  Args are register args, thunk address
  * and stack pointer.
@@ -161,7 +159,6 @@ thunkEntry(long r0, long r1, long r2, long r3,
 			void *thunkpPlus16, sqIntptr_t *stackp)
 {
   VMCallbackContext vmcc;
-  VMCallbackContext *previousCallbackContext;
   int flags;
   int returnType;
   long regArgs[NUM_REG_ARGS];
@@ -188,7 +185,7 @@ thunkEntry(long r0, long r1, long r2, long r3,
   }
 
   if ((returnType = setjmp(vmcc.trampoline)) == 0) {
-    previousCallbackContext = getMRCC();
+    vmcc.savedMostRecentCallbackContext = getMRCC();
     setMRCC(&vmcc);
     vmcc.thunkp = (void *)((char *)thunkpPlus16 - 16);
     vmcc.stackp = stackp;
@@ -196,12 +193,12 @@ thunkEntry(long r0, long r1, long r2, long r3,
     vmcc.floatregargsp = dregArgs;
     interpreterProxy->sendInvokeCallbackContext(&vmcc);
     fprintf(stderr,"Warning; callback failed to invoke\n");
-    setMRCC(previousCallbackContext);
+    setMRCC(vmcc.savedMostRecentCallbackContext);
     interpreterProxy->disownVM(flags);
     return -1;
   }
 
-  setMRCC(previousCallbackContext);
+  setMRCC(vmcc.savedMostRecentCallbackContext);
   interpreterProxy->disownVM(flags);
 
   switch (returnType) {

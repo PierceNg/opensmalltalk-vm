@@ -46,6 +46,11 @@ else ifeq ($(CONFIGURATION),debug)
 else # default CONFIGURATION=product
 	BUILD:=build
 endif
+ifeq ($(THREADING),multi)
+    MAKERSRC:=$(wildcard $(VMSRCDIR)/gcc3x-*interpmt.c $(VMSRCDIR)/cogit.c)
+else
+    MAKERSRC:=$(wildcard $(VMSRCDIR)/gcc3x-*interp.c $(VMSRCDIR)/cogit.c)
+endif
 $(shell mkdir -p deps >/dev/null) # deps is the dependencies directory
 BLDDIR:= $(BUILD)
 OBJDIR:= $(BLDDIR)/vm
@@ -59,7 +64,6 @@ OSXCLASSESDIR:=$(PLATDIR)/iOS/vm/Common/Classes
 OSXPLUGINSDIR:=$(PLATDIR)/iOS/plugins
 UNIXVMDIR:=$(PLATDIR)/unix/vm
 
-MAKERSRC:=$(wildcard $(VMSRCDIR)/gcc3x-*interp.c $(VMSRCDIR)/cogit.c)
 CROSSSRC:= $(wildcard $(CROSSDIR)/*.c)
 #XEX:= ... %/sqMacV2Browser.m ...
 XEX:=%/sqSqueakMainApplication+screen.m %/sqMacV2Window.m \
@@ -104,23 +108,19 @@ endif
 # VM config flags.
 ifeq ($(CONFIGURATION),debug)
 OFLAGS:= -g -O0 -fno-omit-frame-pointer
-DEBUGVM=-DDEBUGVM=1
-INTERPFLAGS:=-DAllocationCheckFiller=0xADD4E55 -D'VM_LABEL(foo)=0'
+DEBUGVM=-DDEBUGVM=1 -DAIO_DEBUG
 else ifeq ($(CONFIGURATION),assert)
 OFLAGS:= -g -O1 -fno-omit-frame-pointer
 DEBUGVM=-DDEBUGVM=0
-INTERPFLAGS:=-DAllocationCheckFiller=0xADD4E55 -D'VM_LABEL(foo)=0'
 else # default CONFIGURATION=product
 OFLAGS:= -g -Os
 DEBUGVM=-DDEBUGVM=0 -DNDEBUG=1 # Define NDEBUG for production to exclude asserts
-INTERPFLAGS:=-D'VM_LABEL(foo)=0'
 endif
 
 TZ:=$(shell date +%Z)
 DEFS:=	$(COGDEFS) -DUSE_GLOBAL_STRUCT=0 -DNO_ISNAN=1 \
 		-DUSE_INLINE_MEMORY_ACCESSORS -D'TZ="$(TZ)"' \
-		-DUSE_METAL=1 \
-		$(INTERPFLAGS)
+		-DUSE_METAL=1 -DHAVE_CONFIG_H=1
 XDEFS:=	-DSQUEAK_BUILTIN_PLUGIN
 CFLAGS:= $(OFLAGS) $(COGDEFS) $(DEBUGVM) $(DEFS) $(XDEFS)
 INCLUDES:= $(addprefix -I,. $(SRCDIRS))
@@ -210,8 +210,13 @@ print-settings:
 	$(info OBJDIR=$(OBJDIR))
 	$(info LIBS=$(LIBS))
 	$(info BUNDLES=$(BUNDLES))
-	$(info deps=$(patsubst %,deps/%.d,$(notdir $(basename $(VMSRC)))))
+	$(info SDK=$(SDK))
 	$(info -----------------------------------------------------)
+
+print-deps:
+	$(info ---------------- Makefile.vm dep files ------------------)
+	$(info deps=$(patsubst %,deps/%.d,$(notdir $(basename $(VMSRC)))))
+	$(info ---------------- Makefile.vm dep files ------------------)
 
 print-objects:
 	$(info ---------------- Makefile.vm objects ------------------)
@@ -267,7 +272,7 @@ $(OBJDIR)/%.lib: FORCE
 	rm -f $(BUILD)/vm/$(*F).ignore
 	$(MAKE) $(MFLAGS) BUILD=$(BUILD) \
 		-f $(call plugin-makefile,$(*F)) MAKEFILE=$(call plugin-makefile,$(*F)) \
-		CONFIGURATION=$(CONFIGURATION) ARCH=$(TARGET_ARCH) \
+		CONFIGURATION=$(CONFIGURATION) ARCH=$(TARGET_ARCH) TARGET_VERSION_MIN=$(TARGET_VERSION_MIN) \
 		PLATDIR=$(PLATDIR) PLUGINSRCDIR=$(PLUGINSRCDIR) VMSRCDIR=$(VMSRCDIR) \
 		LIBNAME=$(*F) COGDEFS="$(COGDEFS)" XDEFS=-DSQUEAK_BUILTIN_PLUGIN \
 		$(PLUGINHACK) \
@@ -291,7 +296,7 @@ $(OBJDIR)/%.bundle:	FORCE
 	rm -f $(BUILD)/vm/$(*F).ignore
 	$(MAKE) $(MFLAGS) BUILD=$(BUILD) \
 		-f $(call plugin-makefile,$(*F)) MAKEFILE=$(call plugin-makefile,$(*F)) \
-		CONFIGURATION=$(CONFIGURATION) ARCH=$(TARGET_ARCH) \
+		CONFIGURATION=$(CONFIGURATION) ARCH=$(TARGET_ARCH) TARGET_VERSION_MIN=$(TARGET_VERSION_MIN) \
 		PLATDIR=$(PLATDIR) PLUGINSRCDIR=$(PLUGINSRCDIR) VMSRCDIR=$(VMSRCDIR) \
 		LIBNAME=$(*F) COGDEFS="$(COGDEFS)" \
 		APP=$(APP) VM=$(VM) BLDDIR=$(BLDDIR) \

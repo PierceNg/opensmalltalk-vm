@@ -49,6 +49,7 @@ OBJDIR:= $(BUILD)/vm
 
 PLATDIR:=../../platforms
 CROSSDIR:=$(PLATDIR)/Cross/vm
+TPDIR:=$(PLATDIR)/Cross/third-party
 WIN32DIR:=$(PLATDIR)/win32/vm
 WIN32PLUGINSDIR:=$(PLATDIR)/win32/plugins
 WIN32MISCDIR:=$(PLATDIR)/win32/misc
@@ -73,6 +74,10 @@ include plugins.int
 
 LIBS:= $(addprefix $(OBJDIR)/, $(addsuffix .lib, $(INTERNAL_PLUGINS)))
 DLLS:= $(addprefix $(OBJDIR)/, $(addsuffix .dll, $(EXTERNAL_PLUGINS)))
+
+ifdef BIT_IDENTICAL_FLOATING_POINT
+LIBS:=$(BUILD)/fdlibm/libm.a $(LIBS)
+endif
 
 #############################################################################
 # The third-party libraries
@@ -111,6 +116,8 @@ VMRES:=	$(VM).res
 VMDEFIN:=$(VM).def.in
 BTOBJ:= $(OBJDIR)/btext.o
 ETOBJ:= $(OBJDIR)/etext.o
+JMPASM:=_setjmp-x86.asm
+JMPOBJ:=$(OBJDIR)/_setjmp-x86.o
 
 .PRECIOUS: mkNamedPrims.exe
 
@@ -210,18 +217,21 @@ $(BTOBJ):	$(WIN32MISCDIR)/btext.c
 $(ETOBJ):	$(WIN32MISCDIR)/etext.c
 	$(CC) -c -o $@ -fomit-frame-pointer -O2 $<
 
+$(JMPOBJ):	$(WIN32MISCDIR)/$(JMPASM)
+	$(AS) -o $@ $<
+
 vm:	$(VMEXE)
 
-$(VMEXE): $(OBJDIR) $(THIRDPARTYLIBS) $(VMOBJ) $(LIBS) $(VMEXP) resource.o $(BTOBJ) $(ETOBJ)
+$(VMEXE): $(OBJDIR) $(THIRDPARTYLIBS) $(VMOBJ) $(LIBS) $(VMEXP) resource.o $(BTOBJ) $(ETOBJ) $(JMPOBJ)
 	$(CC) -o $(OBJDIR)/version.o $(CFLAGS) $(INCLUDES) $(DEFS) -c $(WIN32DIR)/version.c
 	$(LD) $(LDFLAGS) -o $(VMEXE) \
-			$(BTOBJ) $(VMOBJ) $(VMEXP) $(OBJDIR)/resource.o $(filter-out $(call ignore), $(LIBS)) $(STDLIBS) $(ETOBJ)
+			$(BTOBJ) $(VMOBJ) $(VMEXP) $(JMPOBJ) $(OBJDIR)/resource.o $(filter-out $(call ignore), $(LIBS)) $(STDLIBS) $(ETOBJ)
 	$(NM) --numeric-sort --defined-only -f bsd $(VMEXE) >$(VMMAP)
 
-$(CONSOLEVMEXE): $(VMOBJ) $(LIBS) $(VMEXP) resource.o $(BTOBJ) $(ETOBJ)
+$(CONSOLEVMEXE): $(VMOBJ) $(LIBS) $(VMEXP) resource.o $(BTOBJ) $(ETOBJ) $(JMPOBJ)
 	$(CC) -o $(OBJDIR)/version.o $(CFLAGS) $(INCLUDES) $(DEFS) -c $(WIN32DIR)/version.c
 	$(LD) $(CONSOLELDFLAGS) -o $(CONSOLEVMEXE) \
-			$(BTOBJ) $(VMOBJ) $(VMEXP) $(OBJDIR)/resource.o $(filter-out $(call ignore), $(LIBS)) $(STDLIBS) $(ETOBJ)
+			$(BTOBJ) $(VMOBJ) $(VMEXP) $(JMPOBJ) $(OBJDIR)/resource.o $(filter-out $(call ignore), $(LIBS)) $(STDLIBS) $(ETOBJ)
 	$(NM) --numeric-sort --defined-only -f bsd $(CONSOLEVMEXE) >$(CONSOLEVMMAP)
 
 ifneq ($STRIPEXE,)
@@ -278,11 +288,17 @@ $(OBJDIR)/%.dll: $(call plugin-makefile,$(*F))
 	rm -f $(BUILD)/$(*F).ignore
 	$(MAKE) $(MFLAGS) BUILD=$(BUILD) \
 		-f $(call plugin-makefile,$(*F)) \
-		"VM=$(VM)" "VM_NAME=$(VM_NAME)" \
+		"VM=$(VM)" "VM_NAME=$(VM_NAME)" VMLIB=$(OBJDIR)/$(VMLIB) \
 		CONFIGURATION=$(CONFIGURATION) TOOLPREFIX=$(TOOLPREFIX) \
 		PLATDIR=$(PLATDIR) PLUGINSRCDIR=$(PLUGINSRCDIR) VMSRCDIR=$(VMSRCDIR) \
-		THIRDPARTYOUTDIR=$(THIRDPARTYOUTDIR) \
-		COGDEFS="$(COGDEFS)" LIBNAME=$(*F) $(OBJDIR)/$(*F).dll
+		THIRDPARTYOUTDIR=$(THIRDPARTYOUTDIR) JMPOBJ=$(JMPOBJ) \
+		COGDEFS="$(COGDEFS) -DSQUEAK_EXTERNAL_PLUGIN=$(*F)" LIBNAME=$(*F) $(OBJDIR)/$(*F).dll
+
+$(BUILD)/fdlibm/libm.a:
+	@-mkdir -p $(@D)
+	$(MAKE) CC="$(CC)" CFLAGS="$(CFLAGS) -D_IEEE_LIBM" -C $(@D) \
+		TP=../../$(TPDIR) -f ../../$(TPDIR)/fdlibm/Makefile.remote
+
 
 #############################################################################
 # Basic rules

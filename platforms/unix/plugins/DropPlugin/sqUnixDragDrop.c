@@ -37,23 +37,21 @@
  */
 
 #include "sq.h"
+#include "sqAssert.h"
 #include "sqVirtualMachine.h"
 #include "FilePlugin.h"
 #include "DropPlugin.h"
 
-#include <assert.h>
-
-
 extern struct VirtualMachine  *interpreterProxy;
-extern int		       uxDropFileCount;
-extern char		     **uxDropFileNames;
+extern int						uxDropFileCount;
+extern char					  **uxDropFileNames;
+extern void						dndReceived(char *fileName);
 
 #if defined(SQUEAK_INTERNAL_PLUGIN)
 extern SQFile * fileValueOf(sqInt objectPointer);
 #else
 /*	Return a pointer to the first byte of of the SQFile data structure file
-	record within
-	anSQFileRecord, which is expected to be a ByteArray of size
+	record within anSQFileRecord, which is expected to be a ByteArray of size
 	self>>fileRecordSize. 
  */
 
@@ -68,17 +66,53 @@ fileValueOf(sqInt anSQFileRecord)
 sqInt dropInit(void)     { return 1; }
 sqInt dropShutdown(void) { return 1; }
 
-char *dropRequestFileName(sqInt dropIndex)	// in st coordinates
+/* We now set USE_FILE_URIs to 1 in platforms/unix//vm-display-X11/sqUnixXdnd.c
+ * hence dropRequestFileName skips the URI prefix and dropRequestURI includes it
+ */
+char *
+dropRequestFileName(sqInt dropIndex)	// in st coordinates
 {
-	if ((dropIndex > 0) && (dropIndex <= uxDropFileCount)) {
-		assert(uxDropFileNames);
-		dndReceived(uxDropFileNames[dropIndex - 1]);
-		return uxDropFileNames[dropIndex - 1];
-	}
-	return 0;
+	char *fileURIPrefix = "file:///";
+	int prefixLength = 0;
+	char *dropFileName;
+
+	if (dropIndex <= 0 || dropIndex > uxDropFileCount)
+		return 0;
+
+	assert(uxDropFileNames);
+	dndReceived(uxDropFileNames[dropIndex - 1]);
+
+	// The three valid schemes are
+	// file://host/path (prefix length 7)
+	// file:///path     (prefix length 8)
+	// file:/path 		(prefix length 6)
+	// see https://en.wikipedia.org/wiki/File_URI_scheme
+
+	// Compute the length of the prefix...
+	if (!(dropFileName = uxDropFileNames[dropIndex - 1]))
+		return 0;
+	while (*fileURIPrefix && *fileURIPrefix++ == *dropFileName++)
+		++prefixLength;
+
+	// file:///path & file:/path => path; anything else answered verbatim
+	return prefixLength == 8 || prefixLength == 6
+		? uxDropFileNames[dropIndex - 1] + prefixLength
+		: uxDropFileNames[dropIndex - 1];
 }
 
-sqInt dropRequestFileHandle(sqInt dropIndex)
+char *
+dropRequestURI(sqInt dropIndex)	// in st coordinates
+{
+	if (dropIndex <= 0 || dropIndex > uxDropFileCount)
+		return 0;
+
+	assert(uxDropFileNames);
+	dndReceived(uxDropFileNames[dropIndex - 1]);
+	return uxDropFileNames[dropIndex - 1];
+}
+
+sqInt
+dropRequestFileHandle(sqInt dropIndex)
 {
 	char *path= dropRequestFileName(dropIndex);
 	if (path) {
@@ -89,7 +123,3 @@ sqInt dropRequestFileHandle(sqInt dropIndex)
 	}  
 	return interpreterProxy->nilObject();
 }
-
-sqInt	sqSecFileAccessCallback(void *callback)               { return 0; }
-void	sqSetNumberOfDropFiles(sqInt numberOfFiles)           { }
-void	sqSetFileInformation(sqInt dropIndex, void *dropFile) { }

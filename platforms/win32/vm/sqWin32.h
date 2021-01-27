@@ -71,7 +71,6 @@
   /* The hardcoded defs:
    * No virtual memory support; no service support; no preferences; no printing
    */
-#	define NO_VIRTUAL_MEMORY
 #	define NO_SERVICE
 #	define NO_PREFERENCES
 #	define NO_PRINTER
@@ -82,8 +81,6 @@
 #	define NO_JOYSTICK
 #	define NO_MIDI
 #	define NO_ASYNC_FILES
-  /* Do not rely on stdio functions but rather pure Win32 stuff */
-#	define WIN32_FILE_SUPPORT
   /* Take out the static strings */
 #	define NO_WARNINGS
 #endif /* MINIMAL */
@@ -193,7 +190,7 @@ extern TCHAR windowClassName[];  /* class name for the window */
 extern char  squeakIniNameA[];   /* full path to ini file - UTF8 */
 extern WCHAR squeakIniNameW[];   /* full path to ini file - UTF16 */
 
-#ifdef UNICODE
+#if _UNICODE
 # define imageNameT imageNameW /* define the generic TCHAR* version */
 # define imagePath  imagePathW
 # define vmName vmNameW
@@ -286,7 +283,7 @@ int __cdecl warnPrintf(char *fmt, ...);
 int __cdecl warnPrintfW(WCHAR *fmt, ...);
 #endif
 
-#ifdef UNICODE
+#if _UNICODE
 #define warnPrintfT warnPrintfW
 #else
 #define warnPrintfT warnPrintf

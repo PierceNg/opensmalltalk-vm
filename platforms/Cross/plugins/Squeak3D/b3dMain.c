@@ -15,31 +15,12 @@
 #include <stdio.h>  /* printf() */
 #include <stdlib.h> /* exit()   */
 #include <limits.h> /* INT_MIN INT_MAX */
-#if 0
-# include <assert.h> /* assert() */
-#endif
+
 #include "b3d.h"
 #include "b3dAlloc.h"
 
 #ifndef NULL
 # define NULL ((void*)0)
-#endif
-
-#if !defined(SQUEAK_BUILTIN_PLUGIN) && !defined(NDEBUG)
-/* A warning for sqAssert.h.  Ideally we would use the one in the interpreter.
- * This is written crappily because we don't yet have warning exported properly
- * to dlls on Windows.  Do we export warning via __declspec or not?
- */
-void
-warning(char *s) { /* Print an error message but don't necessarily exit. */
-# if 0
-	if (erroronwarn) error(s);
-	if (warnpid)
-		printf("\n%s pid %ld\n", s, (long)warnpid);
-	else
-# endif
-		printf("\n%s\n", s);
-}
 #endif
 
 #ifdef B3D_PROFILE

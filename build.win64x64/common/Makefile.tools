@@ -46,7 +46,7 @@ COGDEFS:= $(COGDEFS) -DBIT_IDENTICAL_FLOATING_POINT=1
 endif
 
 ifeq ($(COMPILER_TO_USE),clang)
-COGDEFS:=$(COGDEFS) -mno-stack-arg-probe
+COGDEFS:=$(COGDEFS) -fno-stack-protector
 endif
 
 # Set minimum version to WindowsXP (see /cygwin/usr/include/w32api/w32api.h)
@@ -59,7 +59,7 @@ CFLAGS:= -fdeclspec -msse2 -ggdb2 -m64 \
 
 TZ:=$(shell date +%Z)
 DEFS:=	-D$(VM)VM=1 $(COGDEFS) $(WINVER) \
-		-DWIN64=1 -DWIN32_FILE_SUPPORT -DNO_ISNAN -DNO_SERVICE \
+		-DWIN64=1 -DNO_ISNAN -DNO_SERVICE \
 		$(NDEBUG) -DLSB_FIRST -D'VM_NAME="$(VM_NAME)"' $(XDEFS) $(CROQUET)
 
 #############################################################################
@@ -73,7 +73,7 @@ LD:=	 $(CC)
 LDCXX := $(TOOLPREFIX)clang++ # For linking c++ bundles
 
 EXPORT:=--export-all-symbols
-BASELDFLAGS:=-m64 -mthreads -Wl,$(EXPORT)
+BASELDFLAGS:=-m64 -mthreads -Wl,--stack -Xlinker 2097152,2097152 -Wl,$(EXPORT)
 LDFLAGS:= -mwindows $(BASELDFLAGS)
 CONSOLELDFLAGS:= -mconsole $(BASELDFLAGS)
 STDLIBS:= -lddraw -ldinput -lopengl32 -lws2_32 -lcomdlg32 -lole32 -lwinmm \

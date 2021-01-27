@@ -12,12 +12,74 @@
 
 #include "sqVirtualMachine.h"
 #include "CameraPlugin.h"
+extern struct VirtualMachine *interpreterProxy;
 
 #include <TargetConditionals.h>
 
 #include <Cocoa/Cocoa.h>
 #include <AVFoundation/AVFoundation.h>
+#include <AVFoundation/AVCaptureDevice.h>
 
+// dispatch_release will only compile if macosx-version-min<=10.7
+#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+# undef dispatch_release
+# define dispatch_release(shunned) 0
+#endif
+
+#if defined(MAC_OS_X_VERSION_10_14)
+static canAccessCamera = false;
+static askedToAccessCamera = false;
+
+static void
+askToAccessCamera()
+{
+	askedToAccessCamera = true;
+	// Request permission to access the camera.
+	// This API is only available in the 10.14 SDK and subsequent.
+	switch ([AVCaptureDevice authorizationStatusForMediaType: AVMediaTypeVideo]) {
+		case AVAuthorizationStatusAuthorized:
+			// The user has previously granted access to the camera.
+			canAccessCamera = true;
+			return;
+		case AVAuthorizationStatusNotDetermined: {
+			// The app hasn't yet asked the user for camera access.
+			__block BOOL gotResponse = false;
+			const struct timespec rqt = {0,100000000}; // 1/10th sec
+			[AVCaptureDevice
+				requestAccessForMediaType: AVMediaTypeVideo
+				completionHandler: ^(BOOL granted) {
+										gotResponse = true;
+										canAccessCamera = granted;
+									}];
+			while (!gotResponse)
+				nanosleep(&rqt,0);
+			return;
+		}
+		case AVAuthorizationStatusDenied:
+			// The user has previously denied access.
+			// One would hope one could to ask again; max once per run.
+			// But at least in MacOS X 11.1 one cannot ask again; the request to ask
+			// send (requestAccessForMediaType:completionHandler:) is ignored.
+		case AVAuthorizationStatusRestricted:
+			// The user can't grant access due to restrictions.
+			canAccessCamera = false;
+	}
+}
+#endif
+
+static __inline bool
+ensureCameraAccess()
+{
+#if defined(MAC_OS_X_VERSION_10_14)
+	if (!askedToAccessCamera)
+		askToAccessCamera();
+	if (!canAccessCamera)
+		interpreterProxy->primitiveFailFor(PrimErrInappropriate);
+	return canAccessCamera;
+#else
+	return true;
+#endif
+}
 
 void printDevices();
 
@@ -26,16 +88,17 @@ void printDevices();
   @public
   AVCaptureDeviceInput		*captureInput;
   AVCaptureVideoDataOutput	*captureOutput;
-  AVCaptureDevice		*device;
-  AVCaptureSession		*captureSession;
-  dispatch_queue_t		queue;
-  int				deviceID;
-  int				width;
-  int				height;
-  bool				bInitCalled;
-  unsigned int			*pixels;
-  bool				firstTime;
-  sqInt			frameCount;
+  AVCaptureDevice			*device;
+  AVCaptureSession			*captureSession;
+  dispatch_queue_t			 queue;
+  unsigned int				*pixels;
+  sqInt						 frameCount;
+  int						 deviceID;
+  int						 width;
+  int						 height;
+  int						 semaphoreIndex;
+  bool						 bInitCalled;
+  bool						 firstTime;
 }
 @end
 
@@ -43,7 +106,9 @@ void printDevices();
 }
 @end
 
-SqueakVideoGrabber *grabbers[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+#define CAMERA_COUNT 4
+
+SqueakVideoGrabber *grabbers[CAMERA_COUNT];
 
 @implementation SqueakVideoGrabber
 
@@ -66,6 +131,8 @@ SqueakVideoGrabber *grabbers[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NUL
 	firstTime = false;
 	CVPixelBufferUnlockBaseAddress(imageBuffer, 0);
 	frameCount++;
+	if (semaphoreIndex > 0)
+		interpreterProxy->signalSemaphoreWithIndex(semaphoreIndex);
 }
 
 // If desiredWidth == 0 && desiredHeight == 0 then initialize
@@ -74,7 +141,7 @@ SqueakVideoGrabber *grabbers[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NUL
       desiredWidth:(int)desiredWidth 
       desiredHeight:(int)desiredHeight
 {
-  NSArray *devices = [[AVCaptureDevice devices] filteredArrayUsingPredicate:
+	NSArray *devices = [[AVCaptureDevice devices] filteredArrayUsingPredicate:
      [NSPredicate predicateWithBlock:^BOOL(id object, NSDictionary *bindings) {
         return [object hasMediaType: AVMediaTypeVideo] || [object hasMediaType: AVMediaTypeMuxed];
     }]];
@@ -146,6 +213,7 @@ SqueakVideoGrabber *grabbers[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NUL
   USEPRESETFOR(AVCaptureSessionPreset1280x720,  1280,  720,  960);
   USEPRESETFOR(AVCaptureSessionPreset640x480,    640,  480,  360);
   USEPRESETFOR(AVCaptureSessionPresetMedium,     480,  360,  270);
+  USEPRESETFOR(AVCaptureSessionPreset352x288,    352,  288,  216);
   USEPRESETFOR(AVCaptureSessionPreset320x240,    320,  240,  180);
   USEPRESETFOR(AVCaptureSessionPresetLow,        192,  108,  144);
   USEPRESETFOR(AVCaptureSessionPresetLow,        160,  120,   90);
@@ -188,6 +256,7 @@ SqueakVideoGrabber *grabbers[8] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NUL
   bInitCalled = YES;
   firstTime = true;
   frameCount = 0;
+  semaphoreIndex = -1;
   grabbers[deviceID] = self;
   return self;
 }
@@ -239,11 +308,24 @@ getDeviceName(sqInt cameraNum)
   return (char*)[((AVCaptureDevice*)[devices objectAtIndex: cameraNum-1]).localizedName UTF8String];
 }
 
+static char *
+getDeviceUID(sqInt cameraNum)
+{
+  NSArray *devices = [AVCaptureDevice devicesWithMediaType: AVMediaTypeVideo];
+  if (cameraNum < 1 || cameraNum > [devices count])
+    return NULL;
+  return (char*)[((AVCaptureDevice*)[devices objectAtIndex: cameraNum-1]).uniqueID UTF8String];
+}
+
 sqInt
 CameraOpen(sqInt cameraNum, sqInt desiredWidth, sqInt desiredHeight)
 {
-  if (cameraNum<1 || cameraNum>8)
+  if (cameraNum<1 || cameraNum>CAMERA_COUNT)
 	return false;
+
+  if (!ensureCameraAccess())
+	return false;
+
   SqueakVideoGrabber *grabber = grabbers[cameraNum-1];
 
   if (grabber && grabber->pixels)
@@ -255,16 +337,15 @@ CameraOpen(sqInt cameraNum, sqInt desiredWidth, sqInt desiredHeight)
   return [grabber	initCapture: cameraNum-1
 					desiredWidth: desiredWidth
 					desiredHeight: desiredHeight];
-  return true;
 }
 
 void 
 CameraClose(sqInt cameraNum)
 {
-  if (cameraNum<1 || cameraNum>8)
-	return;
-  SqueakVideoGrabber *grabber = grabbers[cameraNum-1];
-  if (grabber)
+  SqueakVideoGrabber *grabber;
+
+  if (cameraNum >= 1 && cameraNum <= CAMERA_COUNT
+	&& (grabber = grabbers[cameraNum-1]))
 	  [grabber stopCapture: cameraNum];
 }
 
@@ -273,8 +354,11 @@ CameraExtent(sqInt cameraNum)
 {
   SqueakVideoGrabber *grabber;
 
+  if (!ensureCameraAccess())
+	return 0;
+
   /* if the camera is already open answer its extent */
-  if (cameraNum >= 1 && cameraNum <= 8
+  if (cameraNum >= 1 && cameraNum <= CAMERA_COUNT
 	&& (grabber = grabbers[cameraNum-1]))
 	return grabber->width <<16 | grabber->height;
 #if 1
@@ -296,7 +380,7 @@ CameraExtent(sqInt cameraNum)
 sqInt
 CameraGetFrame(sqInt cameraNum, unsigned char *buf, sqInt pixelCount)
 {
-  if (cameraNum<1 || cameraNum>8)
+  if (cameraNum<1 || cameraNum>CAMERA_COUNT)
 	return -1;
   SqueakVideoGrabber *grabber = grabbers[cameraNum-1];
   if (!grabber)
@@ -316,13 +400,42 @@ char *
 CameraName(sqInt cameraNum)
 { return getDeviceName(cameraNum); }
 
+char *
+CameraUID(sqInt cameraNum)
+{ return getDeviceUID(cameraNum); }
+
 static sqInt
 CameraIsOpen(sqInt cameraNum)
 {
 	return
-		cameraNum >= 1 && cameraNum <= 8
+		cameraNum >= 1 && cameraNum <= CAMERA_COUNT
 		&& grabbers[cameraNum-1]
 		&& grabbers[cameraNum-1]->pixels != (unsigned int *)0;
+}
+
+sqInt
+CameraGetSemaphore(sqInt cameraNum)
+{
+  SqueakVideoGrabber *grabber;
+
+  return cameraNum >= 1 && cameraNum <= CAMERA_COUNT
+	  && (grabber = grabbers[cameraNum-1])
+	  && grabber->semaphoreIndex > 0
+		? grabber->semaphoreIndex
+		: 0;
+}
+
+sqInt
+CameraSetSemaphore(sqInt cameraNum, sqInt semaphoreIndex)
+{
+  SqueakVideoGrabber *grabber;
+
+  if (cameraNum >= 1 && cameraNum <= CAMERA_COUNT
+	&& (grabber = grabbers[cameraNum-1])) {
+		grabber->semaphoreIndex = semaphoreIndex;
+		return 0;
+	}
+	return PrimErrNotFound;
 }
 
 sqInt
@@ -334,4 +447,15 @@ CameraGetParam(sqInt cameraNum, sqInt paramNum)
 							* grabbers[cameraNum-1]->height * 4;
 
 	return -2;
+}
+
+sqInt
+cameraInit(void) { return 1; }
+
+sqInt
+cameraShutdown(void)
+{
+	for (int cameraNum = 1; cameraNum <= CAMERA_COUNT; cameraNum++)
+		(void)CameraClose(cameraNum);
+	return 1;
 }

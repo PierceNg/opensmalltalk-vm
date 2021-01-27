@@ -4,21 +4,32 @@
 # These are derived from Xcode v 6.2 for Apple LLVM version 6.0 (clang-600.0.57)
 
 XCODE:=$(shell /usr/bin/xcode-select -p)
+ifneq (,$(shell /usr/bin/xcodebuild -version | grep " 1[2-9]\."))
+$(info **************************** WARNING ********************************)
+$(info ***                                                               ***)
+$(info ***      32-bit builds on Xcode 12 & Big Sur et al may fail!      ***)
+$(info ***                                                               ***)
+$(info **************************** WARNING ********************************)
+endif
 XCUB:=$(XCODE)/usr/bin
 SDKsDIR:=$(XCODE)/Platforms/MacOSX.platform/Developer/SDKs
 #Build the oldest SDK installed
-SDKs:=MacOSX10.9.sdk MacOSX10.10.sdk MacOSX10.11.sdk MacOSX10.12.sdk MacOSX10.13.sdk
+SDKs:=MacOSX10.9.sdk MacOSX10.10.sdk MacOSX10.11.sdk MacOSX10.12.sdk MacOSX10.13.sdk MacOSX10.14.sdk
 ifeq ($(SDK),)
 SDK:=$(firstword $(realpath $(addprefix $(SDKsDIR)/, $(SDKs))))
 else # Allow Makefile to set specific SDK
 override SDK:=$(realpath $(addprefix $(SDKsDIR)/, $(SDK)))
 endif
 ifeq ($(strip $(SDK)),)
-$(error could not find a valid SDK)
+  ifeq ($(wildcard $(realpath $(addprefix $(SDKsDIR)/,MacOSX.sdk))),)
+	$(error could not find a valid SDK)
+  else
+	SDK:=$(realpath $(addprefix $(SDKsDIR)/,MacOSX.sdk))
+  endif
 endif
 TARGET_ARCH:=i386
 ifeq ($(TARGET_VERSION_MIN),) # Allow Makefile to set TARGET_VERSION_MIN
-TARGET_VERSION_MIN:=10.7
+TARGET_VERSION_MIN:=10.9
 endif
 
 # Determine where to install plugins in the .app bundle using the Squeak

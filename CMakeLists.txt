@@ -2,6 +2,8 @@
 cmake_minimum_required(VERSION 2.8)
 cmake_policy(SET CMP0054 NEW)
 project(OpenSmalltalkVM)
+#for setjmp.asm
+enable_language(ASM-ATT)
 
 option(ONLY_CONFIG_H "Only generate config.h" OFF)
 option(SPUR_OBJECT_MODEL "Spur Object Model" ON)
@@ -275,6 +277,7 @@ include(CheckSymbolExists)
 include(CheckLibraryExists)
 include(CheckTypeSize)
 include(CheckCSourceCompiles)
+include(CheckCSourceRuns)
 
 if(NOT WIN32)
 	include (TestBigEndian)
@@ -316,9 +319,27 @@ check_include_files(sys/dir.h HAVE_SYS_DIR_H)
 check_include_files(sys/filio.h HAVE_SYS_FILIO_H)
 check_include_files(sys/time.h HAVE_SYS_TIME_H)
 
+check_include_files(execinfo.h HAVE_EXECINFO_H)
+check_include_files(fcntl.h HAVE_FCNTL_H)
+check_include_files(inttypes.h HAVE_INTTYPES_H)
+check_include_files(memory.h HAVE_MEMORY_H)
+check_include_files(stdint.h HAVE_STDINT_H)
+check_include_files(stdlib.h HAVE_STDLIB_H)
+check_include_files(strings.h HAVE_STRINGS_H)
+check_include_files(string.h HAVE_STRING_H)
+check_include_files(sys/file.h HAVE_SYS_FILE_H)
+check_include_files(sys/param.h HAVE_SYS_PARAM_H)
+check_include_files(sys/select.h HAVE_SYS_SELECT_H)
+check_include_files(sys/stat.h HAVE_SYS_STAT_H)
+check_include_files(sys/types.h HAVE_SYS_TYPES_H)
+check_include_files("stdlib.h;stdarg.h;string.h;float.h" STDC_HEADERS)
+
 check_include_files(dlfcn.h HAVE_DLFCN_H)
 check_library_exists(dl dlopen "" HAVE_LIBDL)
 check_library_exists(dyld dlopen "" HAVE_DYLD)
+# is for the symbol
+check_library_exists(dl dlerror "" HAVE_DLERROR)
+check_library_exists(dyld dlerror  "" HAVE_DLERROR)
 
 # check_include_files(iconv.h HAVE_ICONV_H)
 # check_library_exists(iconv iconv "" HAVE_ICONV)
@@ -337,6 +358,14 @@ check_function_exists(select HAVE_SELECT)
 check_function_exists(epoll_create1 HAVE_EPOLL)
 check_function_exists(epoll_pwait HAVE_EPOLL_PWAIT)
 
+
+
+check_c_source_compiles("
+#include <pthread.h>
+int main() { 
+int i = PTHREAD_PRIO_INHERIT;
+return i;}" HAVE_PTHREAD_PRIO_INHERIT)
+
 # Time structures
 set(CMAKE_EXTRA_INCLUDE_FILES time.h)
 if(HAVE_SYS_TIME_H)
@@ -354,7 +383,32 @@ int main()
 	HAVE_TM_GMTOFF
 )
 check_type_size("struct timezone" HAVE_TIMEZONE)
+check_c_source_compiles(
+"#include <time.h>
+int main() {
+  static struct tm a;
+  if (a.tm_zone) return 0;
+  return 0; }" HAVE_STRUCT_TM_TM_ZONE)
+if(HAVE_STRUCT_TM_TM_ZONE)
+  set(HAVE_TM_ZONE TRUE)
+endif()
 set(CMAKE_EXTRA_INCLUDE_FILES)
+
+# stat structure
+if(HAVE_SYS_STAT_H)
+  check_c_source_compiles("
+#include <sys/stat.h>
+int main() {
+  static struct stat a;
+  if (a.st_blksize) return 0;
+  return 0;}" HAVE_STRUCT_STAT_ST_BLKSIZE)
+  if(HAVE_STRUCT_STAT_ST_BLKSIZE)
+    set(HAVE_ST_BLKSIZE TRUE)
+  endif()
+else()
+  set(HAVE_STRUCT_STAT_ST_BLKSIZE FALSE)
+  set(HAVE_ST_BLKSIZE FALSE)
+endif()
 
 # Type sizes
 if(BUILD_I386_VERSION OR SQUEAK_PLATFORM_X86_32)
@@ -367,14 +421,6 @@ else()
 	check_type_size("long" SIZEOF_LONG)
 	check_type_size("long long" SIZEOF_LONG_LONG)
 	check_type_size("void*" SIZEOF_VOID_P)
-endif()
-
-if("${SIZEOF_LONG}" STREQUAL "8")
-	set(SQUEAK_INT64_TYPEDEF "long")
-elseif("${SIZEOF_LONG_LONG}" STREQUAL "8")
-	set(SQUEAK_INT64_TYPEDEF "long long")
-else()
-	message(FATAL_ERROR "Failed to find a 64 bits integer type.")
 endif()
 
 if(HAVE_LIBDL)
@@ -580,6 +626,12 @@ elseif(WIN32)
 		platforms/minheadless/windows
 	)
 
+	if(SQUEAK_PLATFORM_X86_32)
+		set(SETJMP_IMPL platforms/win32/misc/_setjmp-x86.asm)
+	else()
+		set(SETJMP_IMPL platforms/win32/misc/_setjmp-x64.asm)
+	endif()
+
 	set(VM_PLATFORM_SOURCES
     	platforms/minheadless/windows/sqWin32Alloc.h
         platforms/minheadless/windows/sqWin32HandleTable.h
@@ -595,6 +647,7 @@ elseif(WIN32)
     	platforms/minheadless/windows/sqWin32Stubs.c
     	platforms/minheadless/windows/sqWin32Threads.c
     	platforms/minheadless/windows/sqWin32Time.c
+		${SETJMP_IMPL}
 		${VM_PLATFORM_SOURCES}
 	)
     add_definitions(

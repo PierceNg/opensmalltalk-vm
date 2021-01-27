@@ -27,37 +27,23 @@ override VCINSTALLDIR:=$(shell echo "$(VCINSTALLDIR)" | sed 's/ /\\ /g')
 override VCINSTALLDIRSH:=$(shell echo "$(VCINSTALLDIR)" | sed 's/[()]/\\&/g')
 
 #############################################################################
-# C compiler settings Visual C++ 2017 Community Edition
+# C compiler settings assuming Visual C++ 2017 Community Edition
 #
-# Now choose the compiler.  If Clang/C2 has been installed use it, otherwise
-# use MSVC
+# Try and choose a compiler.  Alas clang-cl does not appear to support x86.
+# And ClangC2 is broken.  So just use MSVC
+#
 
 $(info VCINSTALLDIR=$(VCINSTALLDIR))
 $(info VCINSTALLDIRSH=$(VCINSTALLDIRSH))
 #$(info wildcard VCINSTALLDIR $(wildcard $(VCINSTALLDIR)/.*))
-#$(info wildcard VCINSTALLDIR/Tools/ClangC2 $(wildcard $(VCINSTALLDIR)/Tools/ClangC2/.*))
-#$(info wildcard VCINSTALLDIR/Tools/ClangC3 $(wildcard $(VCINSTALLDIR)/Tools/ClangC3/.*))
-ifneq ($(wildcard $(VCINSTALLDIR)/Tools/ClangC2/.*),)
-$(info Clang/C2 detected)
-#$(info shell echo VCINST...SH/./clang.exe $(shell echo $(VCINSTALLDIRSH)Tools/ClangC2/*/bin/HostX64/clang.exe))
-CC:="$(shell echo $(VCINSTALLDIRSH)Tools/ClangC2/*/bin/HostX64/clang.exe)"
-ClangC2:=ClangC2
-undefine MSVC
-LINKERARGS=-Xlinker
-CLANG_ADAPT:=-fmsc-version=1916 # as reported by boost for MSVC Community 2017
-CLANG_LINK_ADAPT:=-defaultlib:libcmt
-CLANG_VERSION:=$(basename $(dir $(dir $(dir $(CC)))))
-$(info CLANG_VERSION=$(CLANG_VERSION))
-PATH:=$(PATH):$(dir $(shell echo $(VCINSTALLDIRSH)Tools/ClangC2/*/bin/HostX64/clang.exe))x86
-$(info $$PATH=$(PATH))
-else
-$(info Clang/C2 not found)
+$(info wildcard  C:/Program\ Files/LLVM/bin/.* $(wildcard C:/Program\ Files/LLVM/bin/.*))
+
 override TOOLPREFIX:="$(VCToolsInstallDir)bin/HostX64/x86/"
 MSVC:=MSVC
+undefine Clang
 undefine ClangC2
-LINKERARGS=/link
 CC:=$(TOOLPREFIX)cl.exe -nologo
-endif
+
 $(info CC=$(CC))
 
 
@@ -100,12 +86,11 @@ CFLAGS=	-m32 -MD -DLP32=1 -DWIN32=1 -gcodeview $(OFLAGS) \
 	$(NOBUILTIN) $(WARNINGS)
 endif
 
-# Do _not_ define NDEBUG.  The entire point of the msvc build is to debug with
+# Do _not_ define NDEBUG.  One key point of the msvc build is to debug with
 # MSVC and defining NDEBUG installs a default catch-everything exception handler
 # that effectively disables debugging.
-#DEFS:=	-DWIN32_FILE_SUPPORT -DNO_SERVICE -DNO_STD_FILE_SUPPORT -DNDEBUG \
-#	-DLSB_FIRST -DVM_NAME=\"$(VM)\" -DX86 $(XDEFS) $(CROQUET)
-DEFS:=	-DWIN32_FILE_SUPPORT -DNO_SERVICE -DLSB_FIRST -DX86 $(XDEFS) $(CROQUET)
+#DEFS:=	-DNO_SERVICE -DNDEBUG -DLSB_FIRST -DX86 $(XDEFS) $(CROQUET)
+DEFS:=	-DNO_SERVICE -DLSB_FIRST -DX86 $(XDEFS) $(CROQUET)
 # XDEFS=	-DSQUEAK_BUILTIN_PLUGIN
 # Include the Microsoft headers and any extras.
 # Put -I. last because boost includes bizarreness such as

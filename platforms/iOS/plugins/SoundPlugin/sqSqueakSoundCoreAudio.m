@@ -38,19 +38,75 @@
  location as other such third-party acknowledgments.
  */
 
-#include "sqMemoryFence.h"
-#include "sqAssert.h"
-
 #import <CoreAudio/CoreAudio.h>
+#include <AVFoundation/AVCaptureDevice.h>
 
 //typedef struct _device { AudioDeviceID id; } DeviceID;
 
 #import "sqSqueakSoundCoreAudio.h"
 
+#import "sqMemoryFence.h"
+#import "sqAssert.h"
+
 #define SqueakFrameSize	4	// guaranteed (see class SoundPlayer)
 extern struct VirtualMachine* interpreterProxy;
 
-void
+#if defined(MAC_OS_X_VERSION_10_14)
+static canAccessMicrophone = false;
+static askedToAccessMicrophone = false;
+
+static void
+askToAccessMicrophone()
+{
+	askedToAccessMicrophone = true;
+	// Request permission to access the microphone.
+	// This API is only available in the 10.14 SDK and subsequent.
+	switch ([AVCaptureDevice authorizationStatusForMediaType: AVMediaTypeAudio]) {
+		case AVAuthorizationStatusAuthorized:
+			// The user has previously granted access to the microphone.
+			canAccessMicrophone = true;
+			return;
+		case AVAuthorizationStatusNotDetermined: {
+			// The app hasn't yet asked the user for microphone access.
+			__block BOOL gotResponse = false;
+			const struct timespec rqt = {0,100000000}; // 1/10th sec
+			[AVCaptureDevice
+				requestAccessForMediaType: AVMediaTypeAudio
+				completionHandler: ^(BOOL granted) {
+										gotResponse = true;
+										canAccessMicrophone = granted;
+									}];
+			while (!gotResponse)
+				nanosleep(&rqt,0);
+			return;
+		}
+		case AVAuthorizationStatusDenied:
+			// The user has previously denied access.
+			// One would hope one could to ask again; max once per run.
+			// But at least in MacOS X 11.1 one cannot ask again; the request to ask
+			// send (requestAccessForMediaType:completionHandler:) is ignored.
+		case AVAuthorizationStatusRestricted:
+			// The user can't grant access due to restrictions.
+			canAccessMicrophone = false;
+	}
+}
+#endif
+
+static __inline bool
+ensureMicrophoneAccess()
+{
+#if defined(MAC_OS_X_VERSION_10_14)
+	if (!askedToAccessMicrophone)
+		askToAccessMicrophone();
+	if (!canAccessMicrophone)
+		interpreterProxy->primitiveFailFor(PrimErrInappropriate);
+	return canAccessMicrophone;
+#else
+	return true;
+#endif
+}
+
+static void
 MyAudioQueueOutputCallback (sqSqueakSoundCoreAudio *myInstance,
 							AudioQueueRef           inAQ,
 							AudioQueueBufferRef     inBuffer) {
@@ -83,28 +139,14 @@ MyAudioQueueOutputCallback (sqSqueakSoundCoreAudio *myInstance,
 	interpreterProxy->signalSemaphoreWithIndex(myInstance.semaIndexForOutput);	
 }
 
-void
-MyAudioQueuePropertyListener (void *              inUserData,
-							  AudioQueueRef           inAQ,
-							  AudioQueuePropertyID    inID)
-{
-	UInt32 isRunning;
-	UInt32 size = sizeof(isRunning);
-	sqSqueakSoundCoreAudio * myInstance = (__bridge  sqSqueakSoundCoreAudio *)inUserData;
-
-	AudioQueueGetProperty (inAQ, kAudioQueueProperty_IsRunning, &isRunning, &size);
-	myInstance.outputIsRunning = isRunning != 0;
-	//NSLog(@"%i Is Running %i",ioMSecs(),isRunning);
-}
-
-void
+static void
 MyAudioQueueInputCallback ( void                  *inUserData,
 							AudioQueueRef          inAQ,
 							AudioQueueBufferRef    inBuffer,
 							const AudioTimeStamp  *inStartTime,
 							UInt32                 inNumberPacketDescriptions,
 							const AudioStreamPacketDescription  *inPacketDescs) {
-	sqSqueakSoundCoreAudio * myInstance = (__bridge  sqSqueakSoundCoreAudio *)inUserData;
+	sqSqueakSoundCoreAudio *myInstance = (__bridge  sqSqueakSoundCoreAudio *)inUserData;
 
 	if (!myInstance.inputIsRunning) 
 		return;
@@ -359,7 +401,10 @@ MyAudioDevicesListener(	AudioObjectID inObjectID,
 - (sqInt)	snd_StartRecording: (sqInt) desiredSamplesPerSec stereo: (sqInt) stereo semaIndex: (sqInt) semaIndex {
 
 	if (desiredSamplesPerSec <= 0 || stereo < 0 || stereo > 1) 
-		return interpreterProxy->primitiveFail();
+		return interpreterProxy->primitiveFailFor(PrimErrBadArgument);
+
+	if (!ensureMicrophoneAccess())
+		return -1;
 
 	if (self.inputAudioQueue)
 		[self snd_StopRecording];
@@ -401,8 +446,11 @@ MyAudioDevicesListener(	AudioObjectID inObjectID,
 }
 
 - (sqInt)	snd_StopRecording {
-	if (!self.inputAudioQueue) 
+
+	if (!ensureMicrophoneAccess()
+	 || !self.inputAudioQueue) 
 		return 0;
+
 	self.inputIsRunning = 0;
 	OSStatus result = AudioQueueStop (self.inputAudioQueue,true);  //This implicitly invokes AudioQueueReset
 	if (result) 
@@ -414,7 +462,9 @@ MyAudioDevicesListener(	AudioObjectID inObjectID,
 }
 
 - (double) snd_GetRecordingSampleRate {
-	if (!self.inputAudioQueue) 
+
+	if (!ensureMicrophoneAccess()
+	 || !self.inputAudioQueue) 
 		return interpreterProxy->primitiveFail();
 
 	return inputSampleRate;
@@ -424,11 +474,12 @@ MyAudioDevicesListener(	AudioObjectID inObjectID,
 
 	usqInt	count;
 
-	if (!self.inputAudioQueue
+	if (!ensureMicrophoneAccess()
+	 || !self.inputAudioQueue
 	 || startSliceIndex > bufferSizeInBytes) 
 		return interpreterProxy->primitiveFail();
 
-	usqInt    start= startSliceIndex * SqueakFrameSize / 2;
+	usqInt    start = startSliceIndex * SqueakFrameSize / 2;
 	soundAtom	*atom = [self.soundInQueue returnOldest];
 	if (!atom) 
 		return 0;

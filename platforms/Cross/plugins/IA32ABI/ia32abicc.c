@@ -11,7 +11,7 @@
 #if defined(_M_I386) || defined(_M_IX86) || defined(_X86_) || defined(i386) || defined(i486) || defined(i586) || defined(i686) || defined(__i386__) || defined(__386__) || defined(X86) || defined(I386)
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
-# include "windows.h" /* for GetSystemInfo & VirtualAlloc */
+# include <Windows.h> /* for GetSystemInfo & VirtualAlloc */
 #elif __APPLE__ && __MACH__
 # include <sys/mman.h> /* for mprotect */
 # if OBJC_DEBUG /* define this to get debug info for struct objc_class et al */
@@ -185,7 +185,6 @@ __attribute__((optimize("O0")))
 thunkEntry(void *thunkp, sqIntptr_t *stackp)
 {
 	VMCallbackContext vmcc;
-	VMCallbackContext *previousCallbackContext;
 	int flags, returnType;
 
 #if STACK_ALIGN_HACK
@@ -211,7 +210,7 @@ thunkEntry(void *thunkp, sqIntptr_t *stackp)
 	}
 
 	if (!(returnType = setjmp(vmcc.trampoline))) {
-		previousCallbackContext = getMRCC();
+		vmcc.savedMostRecentCallbackContext = getMRCC();
 		setMRCC(&vmcc);
 		vmcc.thunkp = thunkp;
 		vmcc.stackp = stackp + 2; /* skip address of retpc & retpc (thunk) */
@@ -219,11 +218,11 @@ thunkEntry(void *thunkp, sqIntptr_t *stackp)
 		vmcc.floatregargsp = 0;
 		interpreterProxy->sendInvokeCallbackContext(&vmcc);
 		fprintf(stderr,"Warning; callback failed to invoke\n");
-		setMRCC(previousCallbackContext);
+		setMRCC(vmcc.savedMostRecentCallbackContext);
 		interpreterProxy->disownVM(flags);
 		return -1;
 	}
-	setMRCC(previousCallbackContext);
+	setMRCC(vmcc.savedMostRecentCallbackContext);
 	interpreterProxy->disownVM(flags);
 
 	switch (returnType) {

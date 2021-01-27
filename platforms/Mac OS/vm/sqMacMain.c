@@ -78,6 +78,7 @@
 
 #include "sq.h"
 #include "sqAssert.h"
+#include "sqImageFileAccess.h"
 #include "sqMacUIConstants.h"
 #include "sqMacMain.h"
 #include "sqMacUIMenuBar.h"
@@ -163,7 +164,7 @@ char *getVersionInfo(int verbose);
 static void *printRegisterState(ucontext_t *uap);
 
 static void
-reportStackState(char *msg, char *date, int printAll, ucontext_t *uap)
+reportStackState(const char *msg, char *date, int printAll, ucontext_t *uap)
 {
 #if !defined(NOEXECINFO) && defined(HAVE_EXECINFO_H)
 	void *addrs[BACKTRACE_DEPTH+1];
@@ -288,7 +289,7 @@ block()
 /* Disable Intel compiler inlining of error which is used for breakpoints */
 #pragma auto_inline(off)
 void
-error(char *msg)
+error(const char *msg)
 {
 	reportStackState(msg,0,0,0);
 	if (blockOnError) block();
@@ -340,13 +341,13 @@ sigsegv(int sig, siginfo_t *info, void *uap)
 	time_t now = time(NULL);
 	char ctimebuf[32];
 	char crashdump[IMAGE_NAME_SIZE+1];
-	char *fault = sig == SIGSEGV
-					? "Segmentation fault"
-					: (sig == SIGBUS
-						? "Bus error"
-						: (sig == SIGILL
-							? "Illegal instruction"
-							: "Unknown signal"));
+	const char *fault = sig == SIGSEGV
+						? "Segmentation fault"
+						: (sig == SIGBUS
+							? "Bus error"
+							: (sig == SIGILL
+								? "Illegal instruction"
+								: "Unknown signal"));
 
 	if (!inFault) {
 		inFault = 1;
